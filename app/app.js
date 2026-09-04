@@ -299,8 +299,8 @@ function renderDashboard() {
         </div>
       </div>
       <div class="hero-visual">
-        <img src="/assets/帐篷公司出图软件_方案流程示意图_v1.png" alt="帐篷公司出图软件整体业务流程图">
-        <div class="hero-tag"><span data-icon="activity"></span>核心流程已可演示</div>
+        <img src="/assets/dashboard-kids-playing-hero-v1.png" alt="孩子们在梦幻儿童帐篷旁快乐玩耍">
+        <div class="hero-tag"><span data-icon="sparkles"></span>童趣场景 · 真实灵感</div>
       </div>
     </div>
     <div class="metrics-grid">
