@@ -358,7 +358,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .visual-choice.is-active::after { content: ""; position: absolute; top: 9px; right: 9px; width: 17px; height: 17px; background: var(--forest-700); border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 7px rgb(64 54 142 / 28%); }
 .visual-choice.is-active::before { content: ""; position: absolute; z-index: 2; top: 13px; right: 15px; width: 4px; height: 7px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .visual-choice img { width: 100%; height: 72px; object-fit: cover; border-radius: 9px; background: var(--surface-soft); }
-.visual-choice-grid--structure .visual-choice img,
+.visual-choice-grid--structure .visual-choice { min-height: 132px; grid-template-rows: 1fr; gap: 0; padding: 0; background: #fff; }
+.visual-choice-grid--structure .visual-choice img { width: 100%; height: 132px; padding: 0; object-fit: cover; background: #fff; border-radius: 12px; }
+.visual-choice-grid--structure .visual-choice span { position: absolute; right: 8px; bottom: 8px; left: 8px; padding: 7px 9px; color: var(--ink-950); background: rgb(255 255 255 / 88%); border-radius: 8px; box-shadow: 0 5px 16px rgb(50 43 86 / 12%); backdrop-filter: blur(7px); }
 .visual-choice-grid--materials .visual-choice img { padding: 3px; object-fit: contain; background: #fff; }
 .visual-choice span { display: block; padding: 0 3px; font-size: 10px; font-weight: 800; line-height: 1.3; }
 .visual-choice small { display: block; padding: 0 3px; color: var(--ink-500); font-size: 8px; }
