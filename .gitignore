@@ -1,0 +1,10 @@
+.venv/
+build/
+dist/
+__pycache__/
+tests/__pycache__/
+data/
+docs/
+tools/build_meeting_minutes.py
+*.pyc
+*.log
