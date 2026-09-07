@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#302b68">
   <meta name="description" content="创想设计平台——可连接多种图像模型、产品库和行业模板的本地 AI 设计工作台">
   <title>创想设计平台｜AI 产品设计工作台</title>
-  <link rel="stylesheet" href="/styles.css?v=1.0">
+  <link rel="stylesheet" href="/styles.css?v=2.0">
 </head>
 <body>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -53,7 +53,7 @@
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
       <div class="modal-header"><div><span class="eyebrow">PRODUCT LIBRARY</span><h2 id="import-title">导入产品</h2></div><button class="icon-button" data-action="close-modal" aria-label="关闭"><span data-icon="x"></span></button></div>
       <form id="import-form">
-        <label class="drop-zone" for="product-image"><input id="product-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden><span class="drop-icon" data-icon="image"></span><strong>选择产品参考图</strong><span>支持 PNG、JPG、WebP，建议使用清晰白底图</span><img id="upload-preview" alt="产品图片预览" hidden></label>
+        <label class="drop-zone" for="product-image"><input id="product-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden><span class="drop-icon" data-icon="image"></span><strong>选择产品参考图</strong><span>支持 PNG、JPG、WebP，建议使用清晰白底图</span><img id="upload-preview" src="/assets/choices/tent-camp.png" alt="产品图片预览" hidden></label>
         <div class="form-grid">
           <label><span>产品名称</span><input name="name" required placeholder="例如：三人户外露营帐篷"></label>
           <label><span>SKU 编号</span><input name="sku" required placeholder="例如：TENT-3P-001"></label>
@@ -66,6 +66,7 @@
   </div>
 
   <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js?v=1.0" defer></script>
+  <div id="overlay-root"></div>
+  <script src="/app-v2.js?v=2.0" defer></script>
 </body>
 </html>

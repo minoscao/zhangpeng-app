@@ -156,6 +156,10 @@ class DesignFlowHandler(BaseHTTPRequestHandler):
             if ASSET_DIR.resolve() not in candidate.parents:
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
+            if not candidate.exists():
+                app_asset = (APP_DIR / "assets" / path.removeprefix("/assets/")).resolve()
+                if (APP_DIR / "assets").resolve() in app_asset.parents:
+                    candidate = app_asset
             self._send_file(candidate)
             return
 

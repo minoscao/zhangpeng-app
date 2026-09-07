@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-08T00:00:00+08:00",
+  "title": "Design System: 创想设计平台",
+  "extensions": {
+    "colorMeta": {
+      "brand-deep": { "role": "primary", "displayName": "深夜紫", "canonical": "#302b68", "tonalRamp": ["#1b183b", "#302b68", "#41388f", "#5145b4", "#6658d6", "#aaa3ee", "#e8e5fb", "#f4f2ff"] },
+      "canvas": { "role": "neutral", "displayName": "冷灰画布", "canonical": "#f4f3f9", "tonalRamp": ["#272441", "#3f3b5c", "#6d6982", "#8d89a0", "#d4cfe4", "#e5e2ef", "#f4f3f9", "#ffffff"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "工作台标题", "purpose": "页面标题与批量配方标题。" },
+      "body": { "displayName": "界面正文", "purpose": "说明、表格和表单内容。" }
+    },
+    "shadows": [
+      { "name": "surface-low", "value": "0 2px 10px rgb(42 35 85 / 6%)", "purpose": "列表与卡片的轻微层级。" },
+      { "name": "overlay-medium", "value": "0 14px 34px rgb(42 35 85 / 10%)", "purpose": "抽屉、弹窗和高层操作。" }
+    ],
+    "motion": [
+      { "name": "drawer-enter", "value": "220ms cubic-bezier(.22, 1, .36, 1)", "purpose": "右侧产品抽屉进入。" }
+    ],
+    "breakpoints": [
+      { "name": "phone", "value": "460px" },
+      { "name": "compact", "value": "760px" },
+      { "name": "sidebar-collapse", "value": "900px" },
+      { "name": "single-column", "value": "1040px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "每个视图的主要下一步动作。",
+      "html": "<button class=\"ds-btn-primary\">确认并生成</button>",
+      "css": ".ds-btn-primary{min-height:42px;padding:0 18px;color:#fff;background:#5145b4;border:0;border-radius:10px;font:700 14px Aptos,Segoe UI,sans-serif}.ds-btn-primary:hover{background:#41388f}.ds-btn-primary:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "description": "产品库的主要查找控件。",
+      "html": "<input class=\"ds-search\" placeholder=\"搜索产品名称、SKU 或品类\">",
+      "css": ".ds-search{height:42px;padding:0 14px;color:#272441;background:#fff;border:1px solid #e5e2ef;border-radius:10px;font:400 14px Aptos,Segoe UI,sans-serif}.ds-search:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "description": "文本与颜色共同表达状态。",
+      "html": "<span class=\"ds-chip\">已有素材</span>",
+      "css": ".ds-chip{display:inline-flex;padding:4px 9px;color:#278765;background:#e6f5ef;border-radius:999px;font:700 11px Aptos,Segoe UI,sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "安静的生产控制台",
+    "overview": "界面服务于频繁、批量的设计生产：高信息密度，但通过稳定网格、浅色分区和单一紫色动作色保持秩序。",
+    "keyCharacteristics": ["深紫导航与冷白工作区", "轻边框与低阴影", "明确的 SKU 分组和批量公式"],
+    "rules": [{ "name": "One Primary Action", "body": "每个视图只保留一个最高强调的下一步动作。", "section": "colors" }],
+    "dos": ["使用真实白底产品图作为视觉事实。", "让批量公式、进度和保存状态易于定位。"],
+    "donts": ["不要用场景图代替产品底图。", "不要让生成历史脱离 SKU 归属。"]
+  }
+}
