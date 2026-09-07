@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     --clean `
     --onefile `
     --noconsole `
-    --name 'TentFlow Studio' `
+    --name 'DesignFlow Studio' `
     --icon (Join-Path $projectRoot 'assets\tentflow.ico') `
     --distpath $outputDir `
     --workpath (Join-Path $projectRoot 'build\pyinstaller') `
@@ -21,4 +21,8 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     --add-data "$(Join-Path $projectRoot 'assets');assets" `
     (Join-Path $projectRoot 'server.py')
 
-Write-Host "构建完成：$(Join-Path $outputDir 'TentFlow Studio.exe')"
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller 构建失败，退出码：$LASTEXITCODE"
+}
+
+Write-Host "构建完成：$(Join-Path $outputDir 'DesignFlow Studio.exe')"

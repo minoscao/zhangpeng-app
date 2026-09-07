@@ -1,4 +1,4 @@
-"""TentFlow Studio local-first development server.
+"""DesignFlow Studio local-first development server.
 
 Runs entirely on the local machine, serves the desktop-style web interface and
 persists application state to data/state.json. The UI remains usable in demo
@@ -23,14 +23,49 @@ from urllib.parse import unquote, urlparse
 
 BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 PROJECT_ROOT = Path(__file__).resolve().parent
+CONFIG_ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else PROJECT_ROOT
+
+
+def load_local_env(path: Path) -> None:
+    """Load a local .env file without adding a runtime dependency."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name:
+            os.environ.setdefault(name, value)
+
+
+load_local_env(CONFIG_ROOT / ".env")
+if getattr(sys, "frozen", False):
+    # The packaged executable lives in dist/, while local development keeps
+    # the private .env one directory above it. Never bundle the secret itself.
+    load_local_env(CONFIG_ROOT.parent / ".env")
 APP_DIR = BUNDLE_ROOT / "app"
 ASSET_DIR = BUNDLE_ROOT / "assets"
 if getattr(sys, "frozen", False):
-    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "TentFlow Studio" / "data"
+    DATA_DIR = Path(
+        os.environ.get("DESIGNFLOW_DATA_DIR")
+        or Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DesignFlow Studio" / "data"
+    )
 else:
     DATA_DIR = PROJECT_ROOT / "data"
 STATE_FILE = DATA_DIR / "state.json"
 STATE_LOCK = threading.Lock()
+
+
+def public_api_config() -> dict:
+    key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+    return {
+        "provider": "gemini" if key else "demo",
+        "geminiConfigured": bool(key),
+        "keyLast4": key[-4:] if key else "",
+    }
 
 
 def ensure_state() -> None:
@@ -59,11 +94,11 @@ def write_state(payload: dict) -> None:
         temp.replace(STATE_FILE)
 
 
-class TentFlowHandler(BaseHTTPRequestHandler):
-    server_version = "TentFlow/0.3"
+class DesignFlowHandler(BaseHTTPRequestHandler):
+    server_version = "DesignFlow/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
-        print(f"[TentFlow] {self.address_string()} - {fmt % args}")
+        print(f"[DesignFlow] {self.address_string()} - {fmt % args}")
 
     def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -104,7 +139,10 @@ class TentFlowHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
 
         if path == "/api/health":
-            self._send_json({"ok": True, "version": "0.3.0", "mode": "local-demo"})
+            self._send_json({"ok": True, "version": "1.0.0", "mode": "local", **public_api_config()})
+            return
+        if path == "/api/config":
+            self._send_json(public_api_config())
             return
         if path == "/api/state":
             self._send_json(read_state())
@@ -145,7 +183,7 @@ class TentFlowHandler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/api/shutdown":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        self._send_json({"ok": True, "message": "TentFlow Studio 已安全退出"})
+        self._send_json({"ok": True, "message": "创想设计平台已安全退出"})
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
 
@@ -160,7 +198,7 @@ def available_port(preferred: int) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run TentFlow Studio locally")
+    parser = argparse.ArgumentParser(description="Run DesignFlow Studio locally")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     parser.add_argument("--no-browser", action="store_true")
@@ -169,8 +207,8 @@ def main() -> None:
     ensure_state()
     port = available_port(args.port)
     address = f"http://{args.host}:{port}"
-    server = ThreadingHTTPServer((args.host, port), TentFlowHandler)
-    print(f"TentFlow Studio 已启动：{address}")
+    server = ThreadingHTTPServer((args.host, port), DesignFlowHandler)
+    print(f"创想设计平台已启动：{address}")
     print("按 Ctrl+C 停止。数据仅保存在本机 data/state.json。")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(address)).start()

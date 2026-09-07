@@ -3,122 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#4338ca">
-  <meta name="description" content="TentFlow Kids 儿童帐篷设计、素材生产与全球交付工作台">
-  <title>TentFlow Kids｜儿童帐篷设计软件</title>
-  <link rel="stylesheet" href="/styles.css?v=0.10">
+  <meta name="theme-color" content="#302b68">
+  <meta name="description" content="创想设计平台——可连接多种图像模型、产品库和行业模板的本地 AI 设计工作台">
+  <title>创想设计平台｜AI 产品设计工作台</title>
+  <link rel="stylesheet" href="/styles.css?v=1.0">
 </head>
 <body>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 40 40" role="img"><path d="M6 30 20 8l14 22H6Z" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M20 8v22M13 30l7-11 7 11" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
-        </div>
-        <div><strong>TentFlow Kids</strong><span>儿童帐篷创意工作台</span></div>
+        <div class="brand-mark" data-icon="sparkles" aria-hidden="true"></div>
+        <div><strong>创想设计平台</strong><span>多模型 AI 设计工作台</span></div>
       </div>
 
-      <nav class="nav-list">
-        <button class="nav-item is-active" data-route="dashboard" aria-current="page">
-          <span class="nav-icon" data-icon="home"></span><span>工作台</span>
-        </button>
-        <button class="nav-item" data-route="studio">
-          <span class="nav-icon" data-icon="sparkles"></span><span>产品设计</span><span class="nav-badge">AI</span>
-        </button>
-        <button class="nav-item" data-route="library">
-          <span class="nav-icon" data-icon="box"></span><span>素材资产库</span>
-        </button>
-        <button class="nav-item" data-route="global">
-          <span class="nav-icon" data-icon="globe"></span><span>全球获客</span>
-        </button>
-        <button class="nav-item" data-route="deliveries">
-          <span class="nav-icon" data-icon="files"></span><span>交付中心</span>
-        </button>
+      <nav class="nav-list" aria-label="功能导航">
+        <button class="nav-item" data-route="home"><span class="nav-icon" data-icon="home"></span><span>首页</span></button>
+        <button class="nav-item is-active" data-route="studio" aria-current="page"><span class="nav-icon" data-icon="sparkles"></span><span>创建设计</span></button>
+        <button class="nav-item" data-route="products"><span class="nav-icon" data-icon="box"></span><span>产品库</span></button>
+        <button class="nav-item" data-route="templates"><span class="nav-icon" data-icon="grid"></span><span>模板中心</span></button>
+        <button class="nav-item" data-route="assets"><span class="nav-icon" data-icon="image"></span><span>素材库</span></button>
+        <button class="nav-item" data-route="exports"><span class="nav-icon" data-icon="download"></span><span>导出中心</span></button>
       </nav>
 
       <div class="sidebar-section-label">系统</div>
-      <nav class="nav-list nav-list--secondary">
-        <button class="nav-item" data-route="settings">
-          <span class="nav-icon" data-icon="settings"></span><span>模型与设置</span>
-        </button>
-        <button class="nav-item" data-action="shutdown-app">
-          <span class="nav-icon" data-icon="power"></span><span>退出软件</span>
-        </button>
+      <nav class="nav-list nav-list--secondary" aria-label="系统导航">
+        <button class="nav-item" data-route="connections"><span class="nav-icon" data-icon="database"></span><span>模型连接</span></button>
+        <button class="nav-item" data-action="shutdown-app"><span class="nav-icon" data-icon="power"></span><span>退出软件</span></button>
       </nav>
 
       <div class="sidebar-bottom">
-        <div class="local-card">
-          <span class="status-dot" aria-hidden="true"></span>
-          <div><strong>本地模式</strong><span>数据保存在当前电脑</span></div>
-        </div>
-        <div class="profile-button">
-          <span class="avatar">TK</span>
-          <span><strong>儿童帐篷项目组</strong><small>管理员</small></span>
-          <span class="profile-more" aria-hidden="true">•••</span>
-        </div>
+        <div class="local-card"><span class="status-dot" aria-hidden="true"></span><div><strong>本地工作区</strong><span>设计数据保存在当前电脑</span></div></div>
+        <div class="profile-button"><span class="avatar">DS</span><span><strong>Design Studio</strong><small>专业版</small></span><span class="profile-more" aria-hidden="true">›</span></div>
       </div>
     </aside>
 
     <div class="main-column">
       <header class="topbar">
-        <button class="icon-button mobile-menu" id="mobile-menu" aria-label="打开导航" aria-expanded="false">
-          <span data-icon="menu"></span>
-        </button>
-        <div class="topbar-title">
-          <span class="eyebrow" id="route-kicker">概览</span>
-          <h1 id="route-title">工作台</h1>
-        </div>
-        <div class="topbar-actions">
-          <div class="points-pill" role="status" aria-live="polite" title="概念图生成将从积分余额中扣除"><span data-icon="sparkles"></span><span>剩余积分</span><strong id="points-balance">2,680</strong></div>
-          <div class="demo-pill"><span></span>演示适配器</div>
-          <button class="button button--secondary" data-action="open-import">
-            <span data-icon="upload"></span>导入产品
-          </button>
-          <button class="button button--primary" data-action="new-design">
-            <span data-icon="plus"></span>新建设计
-          </button>
-        </div>
+        <button class="icon-button mobile-menu" id="mobile-menu" aria-label="打开导航" aria-expanded="false"><span data-icon="menu"></span></button>
+        <div class="topbar-title"><span class="eyebrow" id="route-kicker">AI DESIGN WORKSPACE</span><h1 id="route-title">创建设计</h1></div>
+        <div class="topbar-context" id="topbar-context"></div>
+        <div class="topbar-actions" id="topbar-actions"></div>
       </header>
-
-      <main id="main-content" tabindex="-1">
-        <div id="app-view" aria-live="polite"></div>
-      </main>
+      <main id="main-content" tabindex="-1"><div id="app-view" aria-live="polite"></div></main>
     </div>
   </div>
 
   <div class="modal-backdrop" id="import-modal" hidden>
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
-      <div class="modal-header">
-        <div>
-          <span class="eyebrow">产品 / SKU 库</span>
-          <h2 id="import-title">导入儿童帐篷产品</h2>
-        </div>
-        <button class="icon-button" data-action="close-modal" aria-label="关闭"><span data-icon="x"></span></button>
-      </div>
+      <div class="modal-header"><div><span class="eyebrow">PRODUCT LIBRARY</span><h2 id="import-title">导入产品</h2></div><button class="icon-button" data-action="close-modal" aria-label="关闭"><span data-icon="x"></span></button></div>
       <form id="import-form">
-        <label class="drop-zone" for="product-image">
-          <input id="product-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-          <span class="drop-icon" data-icon="image"></span>
-          <strong>点击选择产品图</strong>
-          <span>推荐白底或透明背景，支持 PNG、JPG、WebP</span>
-          <img id="upload-preview" alt="产品图片预览" hidden>
-        </label>
+        <label class="drop-zone" for="product-image"><input id="product-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden><span class="drop-icon" data-icon="image"></span><strong>选择产品参考图</strong><span>支持 PNG、JPG、WebP，建议使用清晰白底图</span><img id="upload-preview" alt="产品图片预览" hidden></label>
         <div class="form-grid">
-          <label><span>产品名称</span><input name="name" required placeholder="例如：星球探险游戏屋"></label>
-          <label><span>SKU 编号</span><input name="sku" required placeholder="例如：TK-P03"></label>
-          <label><span>产品类别</span><select name="category"><option>Teepee 三角帐</option><option>房屋 / 游戏屋帐篷</option><option>主题弹开帐篷</option><option>隧道 / 球池组合</option><option>床帐 / 顶篷</option><option>室内外露营帐</option><option>婴幼儿防晒帐</option><option>睡衣派对 A 字帐</option></select></label>
-          <label><span>默认市场</span><select name="market"><option>全球通用</option><option>北美</option><option>欧洲</option><option>澳新</option><option>中东</option><option>东南亚</option></select></label>
+          <label><span>产品名称</span><input name="name" required placeholder="例如：三人户外露营帐篷"></label>
+          <label><span>SKU 编号</span><input name="sku" required placeholder="例如：TENT-3P-001"></label>
+          <label><span>产品品类</span><input name="category" required placeholder="例如：户外装备 / 帐篷"></label>
+          <label><span>产品状态</span><select name="status"><option>资料完善</option><option>设计中</option><option>待确认</option><option>已完成</option></select></label>
         </div>
-        <div class="modal-actions">
-          <button type="button" class="button button--ghost" data-action="close-modal">取消</button>
-          <button type="submit" class="button button--primary"><span data-icon="check"></span>保存并开始设计</button>
-        </div>
+        <div class="modal-actions"><button type="button" class="button button--ghost" data-action="close-modal">取消</button><button type="submit" class="button button--primary"><span data-icon="check"></span>保存到产品库</button></div>
       </form>
     </section>
   </div>
 
   <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js?v=0.10" defer></script>
+  <script src="/app.js?v=1.0" defer></script>
 </body>
 </html>

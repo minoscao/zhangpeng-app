@@ -8,3 +8,9 @@ docs/
 tools/build_meeting_minutes.py
 *.pyc
 *.log
+.env
+.env.*
+!.env.example
+cloudflare/public/
+backups/
+.wrangler/
