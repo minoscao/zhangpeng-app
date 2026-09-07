@@ -14,3 +14,4 @@ tools/build_meeting_minutes.py
 cloudflare/public/
 backups/
 .wrangler/
+.qa/
