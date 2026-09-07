@@ -114,10 +114,13 @@ function applySavedState(saved) {
   };
 }
 
-async function loadState() {
+function loadLocalState() {
   try {
     applySavedState(JSON.parse(localStorage.getItem('designflow-state') || 'null'));
   } catch { /* invalid browser cache falls back to seed data */ }
+}
+
+async function loadState() {
   try {
     const response = await fetch('/api/state', { cache: 'no-store' });
     if (response.ok) {
@@ -156,7 +159,7 @@ function selectedTemplate() { return state.templates.find((item) => item.id === 
 function selectedProduct() { return state.products.find((item) => item.id === state.studio.linkedProductId); }
 function activeGeneration() { return state.generations.find((item) => item.id === state.studio.activeGenerationId) || state.generations[0]; }
 
-function setRoute(route, focus = true) {
+function setRoute(route, focus = true, persist = true) {
   if (!routeMeta[route]) route = 'home';
   state.ui.route = route;
   history.replaceState(null, '', `#${route}`);
@@ -171,7 +174,7 @@ function setRoute(route, focus = true) {
   document.body.classList.remove('nav-open');
   $('#mobile-menu').setAttribute('aria-expanded', 'false');
   render();
-  saveState();
+  if (persist) saveState();
   if (focus) requestAnimationFrame(() => $('#main-content')?.focus({ preventScroll: true }));
 }
 
@@ -491,7 +494,10 @@ document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && 
 
 (async function init() {
   hydrateIcons();
-  await loadState();
+  loadLocalState();
   const initialRoute = location.hash.slice(1);
-  setRoute(routeMeta[initialRoute] ? initialRoute : (state.ui.route || 'studio'), false);
+  setRoute(routeMeta[initialRoute] ? initialRoute : (state.ui.route || 'studio'), false, false);
+  await loadState();
+  const refreshedRoute = location.hash.slice(1);
+  setRoute(routeMeta[refreshedRoute] ? refreshedRoute : (state.ui.route || 'studio'), false, false);
 })();
