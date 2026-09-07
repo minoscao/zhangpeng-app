@@ -73,8 +73,8 @@ const kidsScenes = [
   { name: '室内游戏房', key: 'playroom' },
   { name: '儿童卧室', key: 'bedroom' },
   { name: '亲子阅读角', key: 'reading' },
-  { name: '睡衣派对', key: 'party' },
   { name: '家庭后院', key: 'backyard' },
+  { name: '梦境草甸', key: 'meadow' },
   { name: '沙滩与公园', key: 'beach' },
 ];
 
@@ -86,19 +86,19 @@ const kidsMaterials = [
 ];
 
 const kidsThemes = [
-  { name: '森林动物', key: 'forest' }, { name: '恐龙世界', key: 'dino' },
-  { name: '太空火箭', key: 'space' }, { name: '城堡童话', key: 'castle' },
-  { name: '彩虹独角兽', key: 'rainbow' }, { name: '海洋朋友', key: 'ocean' },
-  { name: '车辆城市', key: 'vehicle' }, { name: '咖啡小店', key: 'cafe' },
+  { name: '森林动物', key: 'animals' }, { name: '恐龙伙伴', key: 'dinosaurs' },
+  { name: '星星月亮', key: 'stars' }, { name: '花朵蝴蝶', key: 'florals' },
+  { name: '彩虹云朵', key: 'rainbows' }, { name: '海洋生物', key: 'ocean' },
+  { name: '交通工具', key: 'vehicles' }, { name: '水果甜点', key: 'treats' },
 ];
 
 const kidsStyles = [
-  { name: '童话插画', key: 'storybook' }, { name: '北欧童趣', key: 'nordic' },
+  { name: '柔光童话', key: 'storybook' }, { name: '北欧简约', key: 'nordic' },
   { name: '活力卡通', key: 'cartoon' }, { name: '蒙氏自然', key: 'montessori' },
-  { name: '梦幻发光', key: 'glow' }, { name: '电商清爽', key: 'commerce' },
+  { name: '星夜微光', key: 'glow' }, { name: '电商白底', key: 'commerce' },
 ];
 
-const choiceImage = (group, key) => `/assets/choices/${group}-${key}.png`;
+const choiceImage = (group, key) => `/assets/choices/${group}-${key}.png?v=0.9`;
 
 function sceneVisual(key) {
   const scenes = {
@@ -173,12 +173,12 @@ const nowLabel = () => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day:
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 const seedState = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   credits: 2680,
   products: [
-    { id: 'p-starlab', name: '星球探险游戏屋', sku: 'TK-P03', category: '主题弹开帐篷', market: '北美', age: '3–6 岁', theme: '太空火箭', image: tentImage('#7467de', '#ff9072', 'STAR LAB', 'popup'), concepts: 4, assets: 18, status: '设计中', updated: '今天 13:42' },
+    { id: 'p-starlab', name: '星球探险游戏屋', sku: 'TK-P03', category: '主题弹开帐篷', market: '北美', age: '3–6 岁', theme: '星星月亮', image: tentImage('#7467de', '#ff9072', 'STAR LAB', 'popup'), concepts: 4, assets: 18, status: '设计中', updated: '今天 13:42' },
     { id: 'p-forest', name: '森林朋友 Teepee', sku: 'TK-T01', category: 'Teepee 三角帐', market: '欧洲', age: '3–6 岁', theme: '森林动物', image: tentImage('#68bfa8', '#ffcf5b', 'FOREST FRIENDS', 'teepee'), concepts: 3, assets: 12, status: '已确认', updated: '昨天 17:08' },
-    { id: 'p-rainbow', name: '彩虹隧道乐园', sku: 'TK-C08', category: '隧道 / 球池组合', market: '全球通用', age: '18个月–6岁', theme: '彩虹乐园', image: tentImage('#ff8fa4', '#6fd4df', 'RAINBOW PLAY', 'tunnel'), concepts: 3, assets: 23, status: '已交付', updated: '09月03日' },
+    { id: 'p-rainbow', name: '彩虹隧道乐园', sku: 'TK-C08', category: '隧道 / 球池组合', market: '全球通用', age: '18个月–6岁', theme: '彩虹云朵', image: tentImage('#ff8fa4', '#6fd4df', 'RAINBOW PLAY', 'tunnel'), concepts: 3, assets: 23, status: '已交付', updated: '09月03日' },
   ],
   concepts: [
     { id: 'c-1', productId: 'p-starlab', title: '月球小基地', scene: 'space', palette: '#7467de', note: '星球紫 · 软圆舷窗 · 北美玩具零售', status: '待确认', created: '今天 13:44' },
@@ -204,12 +204,23 @@ const seedState = {
     { icon: 'globe', title: '发现 4 家儿童渠道门店', detail: '玩具、儿童家居与母婴渠道', time: '42 分钟前' },
   ],
   settings: { provider: 'demo', model: '图像模型（待接入）', keyConfigured: false, keyLast4: '', autoUpdate: true, reviewBeforeSend: true, localOnly: true },
-  ui: { selectedProductId: 'p-starlab', selectedStoreId: 's-1', route: 'dashboard', customSceneImage: '', lastGeneration: null, params: { market: '北美', category: '主题弹开帐篷', age: '3–6 岁', scene: '室内游戏房', material: '柔软聚酯纤维 + 透气网纱', color: '#7467de', style: '童话插画', theme: '太空火箭', count: 4, prompt: '圆角安全结构、网纱观察窗、可拆洗布套；使用通用原创主题，避免未经授权的角色 IP' } },
+  ui: { selectedProductId: 'p-starlab', selectedStoreId: 's-1', route: 'dashboard', customSceneImage: '', lastGeneration: null, params: { market: '北美', category: '主题弹开帐篷', age: '3–6 岁', scene: '室内游戏房', material: '柔软聚酯纤维 + 透气网纱', color: '#7467de', style: '柔光童话', theme: '星星月亮', count: 4, prompt: '圆角安全结构、网纱观察窗、可拆洗布套；使用通用原创装饰元素，避免未经授权的角色 IP' } },
 };
 
 let state = structuredClone(seedState);
 let saveTimer;
 let uploadImageData = '';
+
+function migrateCreativeSelections() {
+  const scenes = { '睡衣派对': '梦境草甸' };
+  const themes = { '恐龙世界': '恐龙伙伴', '太空火箭': '星星月亮', '城堡童话': '花朵蝴蝶', '彩虹独角兽': '彩虹云朵', '彩虹乐园': '彩虹云朵', '海洋朋友': '海洋生物', '车辆城市': '交通工具', '咖啡小店': '水果甜点' };
+  const styles = { '童话插画': '柔光童话', '北欧童趣': '北欧简约', '梦幻发光': '星夜微光', '电商清爽': '电商白底' };
+  state.ui.params.scene = scenes[state.ui.params.scene] || state.ui.params.scene;
+  state.ui.params.theme = themes[state.ui.params.theme] || state.ui.params.theme;
+  state.ui.params.style = styles[state.ui.params.style] || state.ui.params.style;
+  state.products.forEach((product) => { product.theme = themes[product.theme] || product.theme; });
+  state.schemaVersion = 4;
+}
 
 async function loadState() {
   try {
@@ -218,17 +229,18 @@ async function loadState() {
     const saved = await response.json();
     if (saved && Array.isArray(saved.products)) {
       const isLegacyDemo = !saved.schemaVersion && saved.products.some((product) => ['p-alpine', 'p-dune', 'p-roof'].includes(product.id));
-      state = isLegacyDemo ? structuredClone(seedState) : { ...structuredClone(seedState), ...saved, schemaVersion: 3, credits: Number.isFinite(saved.credits) ? saved.credits : seedState.credits, ui: { ...seedState.ui, ...(saved.ui || {}), params: { ...seedState.ui.params, ...(saved.ui?.params || {}) } }, settings: { ...seedState.settings, ...(saved.settings || {}) } };
+      state = isLegacyDemo ? structuredClone(seedState) : { ...structuredClone(seedState), ...saved, schemaVersion: 4, credits: Number.isFinite(saved.credits) ? saved.credits : seedState.credits, ui: { ...seedState.ui, ...(saved.ui || {}), params: { ...seedState.ui.params, ...(saved.ui?.params || {}) } }, settings: { ...seedState.settings, ...(saved.settings || {}) } };
     }
   } catch {
     const cached = localStorage.getItem('tentflow-state');
     if (cached) {
       try {
         const saved = JSON.parse(cached);
-        state = saved?.schemaVersion >= 2 ? { ...structuredClone(seedState), ...saved, schemaVersion: 3, credits: Number.isFinite(saved.credits) ? saved.credits : seedState.credits, ui: { ...seedState.ui, ...(saved.ui || {}), params: { ...seedState.ui.params, ...(saved.ui?.params || {}) } } } : structuredClone(seedState);
+        state = saved?.schemaVersion >= 2 ? { ...structuredClone(seedState), ...saved, schemaVersion: 4, credits: Number.isFinite(saved.credits) ? saved.credits : seedState.credits, ui: { ...seedState.ui, ...(saved.ui || {}), params: { ...seedState.ui.params, ...(saved.ui?.params || {}) } } } : structuredClone(seedState);
       } catch { /* keep seed */ }
     }
   }
+  migrateCreativeSelections();
 }
 
 function saveState() {
@@ -314,7 +326,7 @@ function renderDashboard() {
         <div class="card-header"><div><h3>产品到成交的工作流</h3><p>从产品资产开始，每一步都保留版本和记录</p></div><button class="button button--ghost card-action" data-route="studio">进入设计 <span data-icon="chevron"></span></button></div>
         <div class="card-body stage-list">
           ${stage(1, '儿童帐篷款式建档', '结构、年龄、主题、材质与市场', '已完成', 'green')}
-          ${stage(2, '童趣概念图与人工确认', '原创主题、配色、角色扮演场景', approved ? '进行中' : '待开始', approved ? 'blue' : 'gray')}
+          ${stage(2, '童趣概念图与人工确认', '装饰元素、配色、角色扮演场景', approved ? '进行中' : '待开始', approved ? 'blue' : 'gray')}
           ${stage(3, '白底图与全球素材', '标准商品图、尺寸与安全卖点', approved ? '可生成' : '等待确认', approved ? 'amber' : 'gray')}
           ${stage(4, '网站 · PPT · 产品手册', '模板化合成交付', state.deliveries.length ? '已有交付' : '待开始', state.deliveries.length ? 'green' : 'gray')}
           ${stage(5, '儿童渠道与 WhatsApp', '玩具/家居/母婴三套方案与跟进', sent ? '已触达' : '演示就绪', sent ? 'green' : 'amber')}
@@ -342,9 +354,9 @@ function renderLibrary() {
   return `<section class="view">
     ${pageHeading('KIDS TENT TAXONOMY', '款式与素材库', '根据 Target、Walmart、Wayfair、IKEA 与 Etsy 的常见商品组织方式，归并为 8 个可直接用于设计生产的结构类目。', `<button class="button button--primary" data-action="open-import"><span data-icon="upload"></span>导入产品</button>`)}
     <article class="taxonomy-panel">
-      <div class="taxonomy-heading"><div><span class="eyebrow">MARKET CATEGORY MAP</span><h3>国外平台主要儿童帐篷分类</h3><p>先选结构，再叠加森林动物、恐龙、太空、城堡、彩虹等原创童趣主题。</p></div>${statusChip('2026.09 市场整理', 'blue')}</div>
+      <div class="taxonomy-heading"><div><span class="eyebrow">MARKET CATEGORY MAP</span><h3>国外平台主要儿童帐篷分类</h3><p>先选结构，再叠加森林动物、恐龙、星月、花朵、彩虹等原创帐篷装饰元素。</p></div>${statusChip('2026.09 市场整理', 'blue')}</div>
       <div class="taxonomy-grid">${kidsCategories.map((item, index) => `<button class="taxonomy-card taxonomy-card--${(index % 4) + 1}" data-category-pick="${escapeHtml(item.name)}" aria-label="筛选 ${escapeHtml(item.name)}"><span class="taxonomy-copy"><span class="taxonomy-index">${String(index + 1).padStart(2, '0')}</span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.signal)}</small><em>${escapeHtml(item.platforms)}</em></span><img src="${choiceImage('tent', item.key)}" alt="${escapeHtml(item.name)}真实产品图" loading="lazy" decoding="async"></button>`).join('')}</div>
-      <div class="taxonomy-foot"><span>常用主题：森林动物 · 恐龙 · 太空火箭 · 城堡公主 · 独角兽彩虹 · 海洋 · 车辆 · 咖啡店</span><span>设计边界：优先原创通用图形，避免未经授权的角色 IP</span></div>
+      <div class="taxonomy-foot"><span>常用元素：森林动物 · 恐龙 · 星星月亮 · 花朵蝴蝶 · 彩虹云朵 · 海洋生物 · 交通工具 · 水果甜点</span><span>设计边界：优先原创通用图形，避免未经授权的角色 IP</span></div>
     </article>
     <div class="toolbar">
       <label class="search-field"><span data-icon="search"></span><input id="product-search" type="search" placeholder="搜索产品名称、SKU 或市场" aria-label="搜索产品"></label>
@@ -388,8 +400,8 @@ function renderStudio() {
           </div>
           <div class="control-column">
         <div class="control-section"><div class="control-title"><h4>使用场景</h4><span>支持本地图片融合</span></div><div class="visual-choice-grid visual-choice-grid--scenes">${kidsScenes.map((item) => `<button class="visual-choice ${p.scene === item.name ? 'is-active' : ''}" data-choice-param="scene" data-value="${escapeHtml(item.name)}" aria-pressed="${p.scene === item.name}"><img src="${choiceImage('scene', item.key)}" alt="${escapeHtml(item.name)}高端场景图" loading="lazy" decoding="async"><span>${escapeHtml(item.name)}</span></button>`).join('')}<button class="visual-choice visual-choice--upload ${p.scene === '本地上传场景' ? 'is-active' : ''}" data-action="upload-scene" aria-pressed="${p.scene === '本地上传场景'}">${state.ui.customSceneImage ? `<img src="${state.ui.customSceneImage}" alt="已上传场景预览">` : '<span class="upload-plus" aria-hidden="true">+</span>'}<span>${state.ui.customSceneImage ? '更换本地场景' : '上传本地场景'}</span><small>${state.ui.customSceneImage ? '已选择并参与融合' : 'JPG · PNG · WebP'}</small></button></div><input id="scene-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
-        <div class="control-section"><div class="control-title"><h4>原创童趣主题</h4><span>梦幻高级主题灵感</span></div><div class="visual-choice-grid visual-choice-grid--large visual-choice-grid--themes">${kidsThemes.map((item) => `<button class="visual-choice visual-choice--large ${p.theme === item.name ? 'is-active' : ''}" data-choice-param="theme" data-value="${escapeHtml(item.name)}" aria-pressed="${p.theme === item.name}"><img src="${choiceImage('theme', item.key)}" alt="${escapeHtml(item.name)}梦幻主题参考图" loading="lazy" decoding="async"><span>${escapeHtml(item.name)}</span></button>`).join('')}</div></div>
-        <div class="control-section"><div class="control-title"><h4>视觉风格</h4><span>高级画面语言</span></div><div class="visual-choice-grid visual-choice-grid--large visual-choice-grid--styles">${kidsStyles.map((item) => `<button class="visual-choice visual-choice--large ${p.style === item.name ? 'is-active' : ''}" data-choice-param="style" data-value="${escapeHtml(item.name)}" aria-pressed="${p.style === item.name}"><img src="${choiceImage('style', item.key)}" alt="${escapeHtml(item.name)}视觉风格参考图" loading="lazy" decoding="async"><span>${escapeHtml(item.name)}</span></button>`).join('')}</div></div>
+        <div class="control-section"><div class="control-title"><h4>帐篷装饰元素</h4><span>印花 · 贴布 · 绣花灵感</span></div><div class="visual-choice-grid visual-choice-grid--large visual-choice-grid--elements">${kidsThemes.map((item) => `<button class="visual-choice visual-choice--large ${p.theme === item.name ? 'is-active' : ''}" data-choice-param="theme" data-value="${escapeHtml(item.name)}" aria-pressed="${p.theme === item.name}"><img src="${choiceImage('element', item.key)}" alt="${escapeHtml(item.name)}帐篷装饰实物效果" loading="lazy" decoding="async"><span>${escapeHtml(item.name)}</span></button>`).join('')}</div></div>
+        <div class="control-section"><div class="control-title"><h4>视觉风格</h4><span>真实帐篷摄影参考</span></div><div class="visual-choice-grid visual-choice-grid--large visual-choice-grid--styles">${kidsStyles.map((item) => `<button class="visual-choice visual-choice--large ${p.style === item.name ? 'is-active' : ''}" data-choice-param="style" data-value="${escapeHtml(item.name)}" aria-pressed="${p.style === item.name}"><img src="${choiceImage('style', item.key)}" alt="${escapeHtml(item.name)}真实帐篷视觉参考" loading="lazy" decoding="async"><span>${escapeHtml(item.name)}</span></button>`).join('')}</div></div>
           </div>
         </div>
         <div class="control-section"><label class="field"><span>补充要求</span><textarea data-param="prompt">${escapeHtml(p.prompt)}</textarea></label></div>
@@ -398,7 +410,7 @@ function renderStudio() {
       <div class="studio-main">
         <div class="studio-stepper"><div class="step is-done"><span>1</span>产品建档</div><i class="step-line"></i><div class="step ${concepts.length ? 'is-done' : 'is-active'}"><span>2</span>概念出图</div><i class="step-line"></i><div class="step ${approved ? 'is-done' : 'is-active'}"><span>3</span>人工确认</div><i class="step-line"></i><div class="step ${approved ? 'is-active' : ''}"><span>4</span>白底图</div><i class="step-line"></i><div class="step"><span>5</span>全球素材</div></div>
         <div class="concept-toolbar"><p><strong>${escapeHtml(product.name)}</strong> · ${escapeHtml(product.category)} · ${concepts.length} 个概念方案</p><div class="generation-meta"><span>${svgIcon('clock')} ${latest ? `生成于 ${escapeHtml(latest.time)}` : '尚未开始新生成'}</span><strong>${latest ? `-${latest.cost} 积分` : `${generationCost} 积分 / 次`}</strong></div><div class="view-toggle"><button class="is-active" aria-label="网格视图" aria-pressed="true"><span data-icon="grid"></span></button><button aria-label="列表视图尚未开放" disabled><span data-icon="list"></span></button></div></div>
-        ${concepts.length ? `<div class="concept-grid">${concepts.map((c, index) => conceptCard(c, product, index)).join('')}</div>` : `<div class="empty-state">${svgIcon('sparkles')}<div><h3>还没有童趣概念方案</h3><p>在左侧选择结构、年龄、原创主题、颜色和风格，然后生成第一批方案。</p><button class="button button--primary" data-action="generate-concepts">生成概念方案</button></div></div>`}
+        ${concepts.length ? `<div class="concept-grid">${concepts.map((c, index) => conceptCard(c, product, index)).join('')}</div>` : `<div class="empty-state">${svgIcon('sparkles')}<div><h3>还没有童趣概念方案</h3><p>在左侧选择结构、年龄、装饰元素、颜色和风格，然后生成第一批方案。</p><button class="button button--primary" data-action="generate-concepts">生成概念方案</button></div></div>`}
       </div>
     </div>
   </section>`;
@@ -612,7 +624,7 @@ function generateSchemes() {
   showProgress('正在分析当地市场', `${store.city} · ${store.type} · 自动形成三套方案`, () => {
     state.schemes = state.schemes.filter((s) => s.storeId !== store.id);
     const schemes = [
-      { title: '亲子阅读角增长包', summary: `面向 ${store.city} 的年轻家庭，突出舒适陪伴、家居融合与安静阅读。`, points: [`主推 ${product.category} + 软垫组合`, '北欧童趣配色 + 家居场景视觉', '门店陈列图 + 30 秒家长卖点'] },
+      { title: '亲子阅读角增长包', summary: `面向 ${store.city} 的年轻家庭，突出舒适陪伴、家居融合与安静阅读。`, points: [`主推 ${product.category} + 软垫组合`, '北欧简约配色 + 家居场景视觉', '门店陈列图 + 30 秒家长卖点'] },
       { title: '主题角色扮演系列', summary: `围绕 ${product.theme || state.ui.params.theme} 建立故事世界，用原创图形提升儿童吸引力。`, points: ['强化大图形识别与互动窗口', '三套可替换主题花型', '年龄分层产品页 + 安全信息页'] },
       { title: '睡衣派对社交套装', summary: `以派对、生日与亲子活动内容，为门店社交账号和节日促销引流。`, points: ['场景图 + 姓名定制展示', '节日短文案 + 套装销售结构', '网站素材包 + WhatsApp 首触话术'] },
     ];
@@ -653,7 +665,7 @@ function catalogHtml() {
   const product = selectedProduct();
   const store = selectedStore();
   const schemes = state.schemes.filter((s) => s.storeId === store?.id);
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(product?.name || 'TentFlow Kids')} 产品提案</title><style>body{font-family:Arial,'Microsoft YaHei',sans-serif;margin:0;color:#35305f;background:#f7f5ff}main{max-width:960px;margin:auto;padding:56px}header{padding:48px;background:linear-gradient(135deg,#4d42a7,#7467de);color:white;border-radius:24px}h1{font-size:44px;margin:8px 0}.meta{color:#e7e3ff}.product{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center;margin:32px 0;background:white;padding:28px;border-radius:20px}.product img{width:100%}.schemes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.scheme{background:white;padding:20px;border-radius:16px}.scheme span{color:#6254c8;font-weight:bold;font-size:12px}li{margin:8px 0}@media(max-width:700px){main{padding:18px}.product,.schemes{grid-template-columns:1fr}}</style><main><header><div>TENTFLOW KIDS · LOCAL PROPOSAL</div><h1>${escapeHtml(product?.name || '儿童帐篷产品')}</h1><p class="meta">${escapeHtml(store?.name || '全球儿童渠道')} · ${escapeHtml(store?.city || '')}</p></header><section class="product"><img src="${product?.image || ''}" alt="儿童帐篷产品图"><div><h2>${escapeHtml(product?.sku || '')}</h2><p>${escapeHtml(product?.category || '')} · ${escapeHtml(product?.age || '')} · ${escapeHtml(product?.market || '')}</p><p>从童趣概念、白底图到全球化营销素材，统一生成并可追溯。</p><p><strong>原创主题：</strong>${escapeHtml(product?.theme || '通用童趣')}</p></div></section><h2>三套本地化方案</h2><section class="schemes">${(schemes.length ? schemes : [{title:'方案待生成',summary:'请先在全球儿童渠道页面生成三套方案。',points:[]}]).map((s,i)=>`<article class="scheme"><span>方案 ${String.fromCharCode(65+i)}</span><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.summary)}</p><ul>${s.points.map(p=>`<li>${escapeHtml(p)}</li>`).join('')}</ul></article>`).join('')}</section></main></html>`;
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(product?.name || 'TentFlow Kids')} 产品提案</title><style>body{font-family:Arial,'Microsoft YaHei',sans-serif;margin:0;color:#35305f;background:#f7f5ff}main{max-width:960px;margin:auto;padding:56px}header{padding:48px;background:linear-gradient(135deg,#4d42a7,#7467de);color:white;border-radius:24px}h1{font-size:44px;margin:8px 0}.meta{color:#e7e3ff}.product{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center;margin:32px 0;background:white;padding:28px;border-radius:20px}.product img{width:100%}.schemes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.scheme{background:white;padding:20px;border-radius:16px}.scheme span{color:#6254c8;font-weight:bold;font-size:12px}li{margin:8px 0}@media(max-width:700px){main{padding:18px}.product,.schemes{grid-template-columns:1fr}}</style><main><header><div>TENTFLOW KIDS · LOCAL PROPOSAL</div><h1>${escapeHtml(product?.name || '儿童帐篷产品')}</h1><p class="meta">${escapeHtml(store?.name || '全球儿童渠道')} · ${escapeHtml(store?.city || '')}</p></header><section class="product"><img src="${product?.image || ''}" alt="儿童帐篷产品图"><div><h2>${escapeHtml(product?.sku || '')}</h2><p>${escapeHtml(product?.category || '')} · ${escapeHtml(product?.age || '')} · ${escapeHtml(product?.market || '')}</p><p>从童趣概念、白底图到全球化营销素材，统一生成并可追溯。</p><p><strong>装饰元素：</strong>${escapeHtml(product?.theme || '通用童趣')}</p></div></section><h2>三套本地化方案</h2><section class="schemes">${(schemes.length ? schemes : [{title:'方案待生成',summary:'请先在全球儿童渠道页面生成三套方案。',points:[]}]).map((s,i)=>`<article class="scheme"><span>方案 ${String.fromCharCode(65+i)}</span><h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.summary)}</p><ul>${s.points.map(p=>`<li>${escapeHtml(p)}</li>`).join('')}</ul></article>`).join('')}</section></main></html>`;
 }
 
 function exportWebsite() {
@@ -666,7 +678,7 @@ function exportPptOutline() {
   const product = selectedProduct();
   const store = selectedStore();
   const schemes = state.schemes.filter((s) => s.storeId === store?.id);
-  const text = `# ${product?.name || '儿童帐篷产品'}｜儿童渠道合作提案\n\n## 1. 项目与产品\n- SKU：${product?.sku || ''}\n- 结构类目：${product?.category || ''}\n- 适用年龄：${product?.age || state.ui.params.age || ''}\n- 原创主题：${product?.theme || state.ui.params.theme || ''}\n- 目标市场：${store?.city || '全球'}\n\n## 2. 当地市场洞察\n- 目标渠道：${store?.type || '儿童用品门店'}\n- 核心机会：年龄分层产品组合与统一童趣营销素材\n\n## 3. 三套方案\n${schemes.map((s,i)=>`### 方案 ${String.fromCharCode(65+i)}｜${s.title}\n${s.summary}\n${s.points.map(p=>`- ${p}`).join('\n')}`).join('\n\n') || '- 请先生成三套本地化方案'}\n\n## 4. 交付内容\n- 儿童帐篷概念图与白底图\n- 网站素材包与年龄/安全卖点\n- 产品手册与销售话术\n\n## 5. 下一步\n- 确认主推方案与原创图形\n- 确认样品、测试标准与报价\n- 安排首次沟通\n`;
+  const text = `# ${product?.name || '儿童帐篷产品'}｜儿童渠道合作提案\n\n## 1. 项目与产品\n- SKU：${product?.sku || ''}\n- 结构类目：${product?.category || ''}\n- 适用年龄：${product?.age || state.ui.params.age || ''}\n- 装饰元素：${product?.theme || state.ui.params.theme || ''}\n- 目标市场：${store?.city || '全球'}\n\n## 2. 当地市场洞察\n- 目标渠道：${store?.type || '儿童用品门店'}\n- 核心机会：年龄分层产品组合与统一童趣营销素材\n\n## 3. 三套方案\n${schemes.map((s,i)=>`### 方案 ${String.fromCharCode(65+i)}｜${s.title}\n${s.summary}\n${s.points.map(p=>`- ${p}`).join('\n')}`).join('\n\n') || '- 请先生成三套本地化方案'}\n\n## 4. 交付内容\n- 儿童帐篷概念图与白底图\n- 网站素材包与年龄/安全卖点\n- 产品手册与销售话术\n\n## 5. 下一步\n- 确认主推方案与原创图形\n- 确认样品、测试标准与报价\n- 安排首次沟通\n`;
   downloadBlob(new Blob([text], { type: 'text/markdown;charset=utf-8' }), `${product?.sku || 'TentFlow'}_PPT提纲.md`);
   recordDelivery(`${product?.name || '帐篷产品'}｜经销商提案`, 'PPT 提纲');
 }
