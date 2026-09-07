@@ -98,7 +98,7 @@ const kidsStyles = [
   { name: '星夜微光', key: 'glow' }, { name: '电商白底', key: 'commerce' },
 ];
 
-const choiceImage = (group, key) => `/assets/choices/${group}-${key}.png?v=0.9`;
+const choiceImage = (group, key) => `/assets/choices/${group}-${key}.${['scene', 'element', 'style'].includes(group) ? 'jpg' : 'png'}?v=0.10`;
 
 function sceneVisual(key) {
   const scenes = {
