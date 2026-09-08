@@ -21,7 +21,7 @@ The workspace treats the SKU and its real product image as the system of record,
 
 ## Operating Context
 
-- Users maintain product information, clean e-commerce base images, specifications, and generation history.
+- Users maintain product information, clean e-commerce base images, optional metadata, and generation history.
 - A production run may include several SKUs and several prompt dimensions such as location, color, style, scene, and output purpose.
 - Generated assets must remain traceable to both the SKU and the prompt combination that produced them.
 
@@ -30,6 +30,7 @@ The workspace treats the SKU and its real product image as the system of record,
 - Product-library images must be clean product base images, preferably white-background e-commerce photography, rather than arbitrary generated scene examples.
 - Product rows open a right-side detail drawer with product information and generated-assets tabs.
 - The batch workspace supports multiple selected products, reusable prompt groups, live combination totals, a confirmation step, grouped progress/results, per-image regenerate/delete, and one-click save back to product history.
+- The batch workspace does not impose a fixed-product-specification step; selected product images are creative references that can be mixed with prompt combinations.
 - Data must persist across refreshes in the local/static-hosting experience.
 - The deployed client must never expose API credentials.
 - Open decision: “2D storage mode” may mean image-only storage or a two-dimensional SKU-by-tag organization; the current implementation treats outputs as 2D image assets grouped by SKU and tags.

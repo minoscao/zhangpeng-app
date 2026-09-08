@@ -199,13 +199,6 @@ function renderSelectedProducts() {
   return `<div class="selected-products" aria-label="已选择产品">${products.map((product, index) => `<article class="selected-product-card"><button class="selected-product-main" data-action="open-product-drawer" data-id="${product.id}"><span class="product-order">${index + 1}</span><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.sku)}</small></span></button><button class="icon-button remove-product" data-action="remove-selected-product" data-id="${product.id}" aria-label="移除${escapeHtml(product.name)}">${svgIcon('x')}</button></article>`).join('')}<button class="add-product-card" data-action="open-product-picker">${svgIcon('plus')}<span>添加产品</span></button></div>`;
 }
 
-function renderFixedSpecs() {
-  const product = selectedProducts()[0];
-  if (!product) return '<div class="empty-inline">请先选择产品，系统会读取产品底图和固定规格。</div>';
-  const specs = [['主底图', product.image, 'image'], ['尺寸', product.specs.size, 'text'], ['面料', product.specs.material, 'text'], ['颜色', product.specs.color, 'text'], ['适用', product.specs.audience, 'text']];
-  return `<div class="fixed-spec-grid">${specs.map(([label, value, type]) => `<div class="fixed-spec"><span>${escapeHtml(label)}</span>${type === 'image' ? `<img src="${escapeHtml(value)}" alt="${escapeHtml(product.name)}底图">` : `<strong>${escapeHtml(value)}</strong>`}</div>`).join('')}</div>`;
-}
-
 function renderPromptGroups() {
   if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。添加地点、颜色或场景后，系统会自动计算组合数量。</div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
@@ -229,11 +222,10 @@ function renderStudio() {
   const progress = batchProgress();
   const batchActive = state.batch.results.length > 0;
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
-    <div class="batch-title"><div><h2>批量创作配方</h2><p>选择真实产品底图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择产品</h3><p>可同时选择多个 SKU，底图和固定规格不会被提示词覆盖。</p></div></div>${renderSelectedProducts()}</section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>固定产品规格</h3><p>当前以第一个产品为预览；生成时每个 SKU 都使用自己的底图与参数。</p></div></div>${renderFixedSpecs()}</section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择提示词组合</h3><p>只展示已选摘要，详细词条在编辑窗口中维护。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>通用提示词</h3><p>对本批次所有产品与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
+    <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>只展示已选摘要，详细词条在编辑窗口中维护。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)}` : '确认后开始生产'}</p></div>${batchActive ? statusChip(state.batch.status === 'generating' ? '生成中' : state.batch.status === 'saved' ? '已完成' : '待保存') : ''}</div>
