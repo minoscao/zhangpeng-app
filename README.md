@@ -23,15 +23,17 @@
 
 也可以运行 `dist/DesignFlow Studio.exe`。EXE 版本把数据保存在当前 Windows 用户的 `%LOCALAPPDATA%/DesignFlow Studio/data/`。
 
-## 配置 Gemini API
+## 配置千问图像模型
 
-把项目根目录的 `.env.example` 复制为 `.env`，再填写：
+线上使用阿里千问 `qwen-image-3.0-pro`，通过 Cloudflare Worker 服务端代理调用。API Key 只能保存为 Worker Secret：
 
-```text
-GEMINI_API_KEY=你的_Google_AI_Studio_密钥
+```powershell
+wrangler secret put QWEN_API_KEY
 ```
 
-“模型连接”页面只显示连接状态和密钥末四位；完整密钥不会发送到浏览器或写入状态文件。当前演示生成仍使用本地适配器，正式调用需在服务端增加统一模型任务接口。
+生成接口为 `/api/qwen/*`，必须由 Cloudflare Access 保护，并在 Worker 中再次校验 Access JWT。Access 应用创建后，将团队域名前缀和应用 Audience 写入 `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`。完整密钥不会发送到浏览器、状态文件或 GitHub。
+
+批量创作会把 SKU 产品图作为参考图，通过异步任务生成并轮询结果。单批最多 24 张、提交并发为 2。阿里返回的图片 URL 仅在 24 小时内有效，生成后应及时下载。
 
 ## 数据对象
 
@@ -66,7 +68,7 @@ wrangler deploy --dry-run
 wrangler deploy --keep-vars
 ```
 
-Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录；`app/assets/studio/` 保存线上工作台图片。
+Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责受保护的千问接口；`app/assets/studio/` 保存线上工作台图片。
 
 ## 目录
 
@@ -78,8 +80,7 @@ Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录；`app/assets
 
 ## 生产化前必须完成
 
-- 服务端多模型适配层与异步任务队列
-- 真实生成进度、失败重试、取消和用量计费
-- 账号权限、云端同步、备份和审计
+- 长期图片对象存储与自动备份
+- 多用户角色、用量账单和审计日志
 - 更完整的图片编辑能力与批量导出
 - Windows 安装包、代码签名与自动更新

@@ -60,11 +60,13 @@ STATE_LOCK = threading.Lock()
 
 
 def public_api_config() -> dict:
-    key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+    key = os.environ.get("QWEN_API_KEY") or ""
     return {
-        "provider": "gemini" if key else "demo",
-        "geminiConfigured": bool(key),
-        "keyLast4": key[-4:] if key else "",
+        "provider": "qwen",
+        "qwenConfigured": bool(key),
+        "accessConfigured": False,
+        "model": "qwen-image-3.0-pro",
+        "maxBatchSize": 24,
     }
 
 

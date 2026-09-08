@@ -34,7 +34,9 @@ const nowLabel = () => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day:
 const BASE_IMAGES = ['/assets/choices/tent-camp.png', '/assets/choices/tent-nursery.png', '/assets/choices/tent-playhouse.png', '/assets/choices/tent-teepee.png', '/assets/choices/tent-aframe.png', '/assets/choices/tent-canopy.png', '/assets/choices/tent-popup.png', '/assets/choices/tent-tunnel.png'];
 const RESULT_IMAGES = ['/assets/studio/tent-hero.png', '/assets/studio/tent-variant-a.png', '/assets/studio/tent-variant-b.png', '/assets/choices/scene-reading.jpg', '/assets/choices/scene-bedroom.jpg', '/assets/choices/scene-backyard.jpg'];
 const CREDIT_PER_IMAGE = 3;
-const MAX_BATCH_SIZE = 324;
+const MAX_BATCH_SIZE = 24;
+const QWEN_POLL_INTERVAL = 10000;
+const QWEN_SUBMIT_CONCURRENCY = 2;
 
 function hydrateIcons(scope = document) {
   $$('[data-icon]', scope).forEach((el) => { el.innerHTML = svgIcon(el.dataset.icon); });
@@ -88,16 +90,17 @@ const seedState = {
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
     { id: 'group-style', name: '视觉风格', options: ['北欧自然', '轻奢柔光', '明亮电商', '户外纪实'] },
   ],
-  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: '保持产品结构和比例准确，真实商业摄影，主体完整，画面干净，不添加文字与水印。', model: '智能视觉 Pro', ratio: '4:3' },
+  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。', model: 'qwen-image-3.0-pro', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
   ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
-  connection: { geminiConfigured: false, keyLast4: '' },
+  connection: { provider: 'qwen', qwenConfigured: false, accessConfigured: false, authenticated: false, user: '', model: 'qwen-image-3.0-pro' },
 };
 
 let state = structuredClone(seedState);
 let uploadImageData = '';
 let saveTimer;
 let generationTimer;
+let activeGenerationId = '';
 let lastFocusedElement = null;
 
 function applySavedState(saved) {
@@ -118,8 +121,10 @@ async function loadState() {
     const response = await fetch('/api/config', { cache: 'no-store' });
     if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
       const config = await response.json();
-      state.connection.geminiConfigured = Boolean(config.geminiConfigured);
-      state.connection.keyLast4 = config.keyLast4 || '';
+      state.connection.provider = config.provider || 'qwen';
+      state.connection.qwenConfigured = Boolean(config.qwenConfigured);
+      state.connection.accessConfigured = Boolean(config.accessConfigured);
+      state.connection.model = config.model || 'qwen-image-3.0-pro';
     }
   } catch { /* connection is optional */ }
 }
@@ -143,7 +148,9 @@ function formulaText() { return [`${selectedProducts().length} 个产品`, ...en
 function batchCost() { return plannedTotal() * CREDIT_PER_IMAGE; }
 function productAssets(id) { return state.savedAssets.filter((asset) => asset.productId === id); }
 function batchReadyCount() { return state.batch.results.filter((item) => item.status === 'ready').length; }
-function batchProgress() { return state.batch.results.length ? Math.round((batchReadyCount() / state.batch.results.length) * 100) : 0; }
+function batchFailedCount() { return state.batch.results.filter((item) => item.status === 'failed').length; }
+function batchSettledCount() { return batchReadyCount() + batchFailedCount(); }
+function batchProgress() { return state.batch.results.length ? Math.round((batchSettledCount() / state.batch.results.length) * 100) : 0; }
 
 function setRoute(route, focus = true, persist = true) {
   if (!routeMeta[route]) route = 'home';
@@ -213,7 +220,14 @@ function renderResultGroups() {
   if (!state.batch.results.length) return `<div class="result-empty"><span>${svgIcon('image')}</span><strong>生成结果会按 SKU 分组</strong><p>确认任务后，这里会先出现对应数量的加载卡片。</p></div>`;
   return selectedProducts().map((product) => {
     const items = state.batch.results.filter((item) => item.productId === product.id);
-    return `<section class="result-product-group"><header><div><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.sku)}</strong><small>${items.filter((item) => item.status === 'ready').length}/${items.length} 已完成</small></span></div></header><div class="result-grid">${items.map((item, index) => `<article class="result-card ${item.status === 'loading' ? 'is-loading' : ''}">${item.status === 'loading' ? `<div class="result-skeleton"><span>${variantLabel(index)}</span></div>` : `<img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${variantLabel(index)}"><span class="result-code">${variantLabel(index)}</span><div class="result-actions"><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${variantLabel(index)}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${variantLabel(index)}">${svgIcon('trash')}</button></div>`}<div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`).join('')}</div></section>`;
+    const completed = items.filter((item) => item.status === 'ready').length;
+    const failed = items.filter((item) => item.status === 'failed').length;
+    return `<section class="result-product-group"><header><div><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.sku)}</strong><small>${completed}/${items.length} 已完成${failed ? ` · ${failed} 张需重试` : ''}</small></span></div></header><div class="result-grid">${items.map((item, index) => {
+      const label = variantLabel(index);
+      if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error"><strong>${label} 生成失败</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="regenerate-result" data-id="${item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton"><span>${label}</span><small>${item.status === 'queued' ? '等待模型' : '生成中'}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      return `<article class="result-card"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"><span class="result-code">${label}</span><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+    }).join('')}</div></section>`;
   }).join('');
 }
 
@@ -228,10 +242,10 @@ function renderStudio() {
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
-    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)}` : '确认后开始生产'}</p></div>${batchActive ? statusChip(state.batch.status === 'generating' ? '生成中' : state.batch.status === 'saved' ? '已完成' : '待保存') : ''}</div>
+    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)}` : 'Qwen Image 3.0 Pro · 登录后生成'}</p></div>${batchActive ? statusChip(state.batch.status === 'generating' ? '生成中' : state.batch.status === 'saved' ? '已完成' : batchFailedCount() && !batchReadyCount() ? '生成失败' : '待保存') : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>预计耗时</small><strong>${Math.max(1, Math.ceil((batchActive ? state.batch.results.length : total) / 12))} 分钟</strong></span></div></div>
-    <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchReadyCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>保存后可在产品详情的“已生成素材”中筛选查看。</p></div>` : ''}
+    <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
+    <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>千问结果链接仅保留 24 小时，请生成后及时下载；保存会保留 SKU 与提示词记录。</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -253,8 +267,9 @@ function renderExports() {
 }
 
 function renderConnections() {
-  const geminiStatus = state.connection.geminiConfigured ? '已保存，待授权' : '未配置';
-  return `<section class="page">${pageHeading('模型连接', '模型只负责生成能力，产品、词库和素材归档独立维护。')}<div class="connection-grid"><article class="connection-card"><div class="connection-head"><span class="model-avatar">G</span><div><h3>Google Gemini</h3><p>${geminiStatus}${state.connection.keyLast4 ? ` · 尾号 ${escapeHtml(state.connection.keyLast4)}` : ''}</p></div></div><div class="capability-list"><span class="tag">文生图</span><span class="tag">图生图</span><span class="tag">批量任务</span></div><button class="button button--quiet" data-action="test-connection" data-provider="Google Gemini">测试连接</button></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">O</span><div><h3>OpenAI Images</h3><p>未配置</p></div></div><div class="capability-list"><span class="tag">图像编辑</span><span class="tag">透明背景</span></div><button class="button button--quiet" data-action="test-connection" data-provider="OpenAI Images">配置连接</button></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">+</span><div><h3>自定义模型</h3><p>通过服务端代理接入</p></div></div><div class="capability-list"><span class="tag">能力自定义</span><span class="tag">私有部署</span></div><button class="button button--quiet" data-action="test-connection" data-provider="自定义模型">添加连接</button></article></div></section>`;
+  const connected = state.connection.qwenConfigured && state.connection.accessConfigured;
+  const status = state.connection.authenticated ? `已授权 · ${state.connection.user || '登录用户'}` : connected ? '服务端密钥已配置 · 等待授权登录' : '正在完成服务端配置';
+  return `<section class="page">${pageHeading('模型连接', '千问模型通过 Cloudflare 服务端安全调用，完整密钥不会进入浏览器或 GitHub。')}<div class="connection-grid"><article class="connection-card connection-card--primary"><div class="connection-head"><span class="model-avatar model-avatar--qwen">Q</span><div><h3>千问图像 3.0 Pro</h3><p>${escapeHtml(status)}</p></div></div><div class="connection-trust">${svgIcon('check')}Cloudflare Access 登录保护 · 服务端 Secret 托管</div><div class="capability-list"><span class="tag">真实产品图参考</span><span class="tag">图生图</span><span class="tag">批量任务</span><span class="tag">最高 2K</span></div><button class="button ${state.connection.authenticated ? 'button--secondary' : 'button--primary'}" data-action="authorize-qwen">${state.connection.authenticated ? '重新检查授权' : '授权登录并检查连接'}</button><p class="connection-note">图片按量计费；结果地址 24 小时有效，请及时下载。</p></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">A</span><div><h3>访问安全</h3><p>${state.connection.accessConfigured ? 'Cloudflare Access 已启用' : '尚未完成'}</p></div></div><div class="capability-list"><span class="tag">JWT 签名校验</span><span class="tag">未登录拒绝调用</span></div><p class="connection-copy">生成接口会验证 Cloudflare 身份签名，公开访客不能消耗模型额度。</p></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">24h</span><div><h3>结果保存提醒</h3><p>阿里临时图片地址限制</p></div></div><div class="capability-list"><span class="tag">逐张下载</span><span class="tag">SKU 归档</span></div><p class="connection-copy">生成完成后请先下载原图。后续接入对象存储后可升级为长期云端归档。</p></article></div></section>`;
 }
 
 function renderProductDrawer() {
@@ -288,7 +303,7 @@ function renderPromptDialog() {
 function renderConfirmDialog() {
   if (!state.ui.confirmBatch) return '';
   const total = plannedTotal();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认生成 ${total} 张创意素材？</h2><p>系统会按 SKU 和提示词组合建立独立结果，生成后可以逐张重做或删除。</p><div class="confirm-summary"><div><span>产品</span><strong>${selectedProducts().map((product) => product.sku).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>预计消耗</span><strong>${batchCost()} 积分</strong></div><div><span>预计耗时</span><strong>约 ${Math.max(1, Math.ceil(total / 12))} 分钟</strong></div></div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch">${svgIcon('sparkles')}开始生成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认调用千问生成 ${total} 张素材？</h2><p>系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务；生成后可以逐张重做或删除。</p><div class="confirm-summary"><div><span>模型</span><strong>Qwen Image 3.0 Pro</strong></div><div><span>产品</span><strong>${selectedProducts().map((product) => product.sku).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>阿里计费</span><strong>按实际成功图片数量结算</strong></div><div><span>预计耗时</span><strong>约 ${Math.max(2, Math.ceil(total / 4))} 分钟</strong></div></div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch">${svgIcon('sparkles')}授权并开始生成</button></div></section></div>`;
 }
 
 function renderOverlays() {
@@ -351,39 +366,163 @@ function buildCombinations() {
   return combinations;
 }
 
-function startBatchGeneration() {
+function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+async function apiJson(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, { cache: 'no-store', ...options });
+  } catch {
+    const error = new Error('网络连接失败，请检查网络后重试。');
+    error.code = 'NETWORK_ERROR';
+    throw error;
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (response.redirected || !contentType.includes('application/json')) {
+    const error = new Error('请先完成 Cloudflare Access 授权登录。');
+    error.code = 'AUTH_REQUIRED';
+    throw error;
+  }
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || '请求失败，请稍后重试。');
+    error.code = data?.error?.code || `HTTP_${response.status}`;
+    throw error;
+  }
+  return data;
+}
+
+async function checkQwenAuthorization() {
+  try {
+    const session = await apiJson('/api/qwen/session');
+    state.connection.authenticated = Boolean(session.authenticated);
+    state.connection.user = session.user || '';
+    saveState(); render();
+    return state.connection.authenticated;
+  } catch (error) {
+    state.connection.authenticated = false;
+    state.connection.user = '';
+    saveState(); render();
+    if (error.code !== 'AUTH_REQUIRED') showToast('授权检查失败', error.message, 'info');
+    return false;
+  }
+}
+
+function openQwenAuthorization(returnHash = 'connections') {
+  const redirect = encodeURIComponent(`/#${returnHash}`);
+  location.assign(`/api/qwen/session?redirect=${redirect}`);
+}
+
+function generationPrompt(product, tags) {
+  const combination = tags.map((tag) => tag.replace('：', '为')).join('；');
+  return [
+    '请基于输入参考图生成一张高端、写实的儿童帐篷商业产品摄影。',
+    `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
+    '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
+    combination ? `本张创作组合：${combination}。` : '',
+    state.studio.universalPrompt,
+    '画面须自然可信、空间尺度合理、材质纹理清晰，适合国际儿童用品电商与品牌手册。',
+  ].filter(Boolean).join('\n');
+}
+
+async function submitQwenResult(result) {
+  const product = productById(result.productId);
+  if (!product) throw new Error('找不到对应产品。');
+  const referenceImage = product.image.startsWith('data:image/') ? product.image : new URL(product.image, location.origin).href;
+  const task = await apiJson('/api/qwen/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: generationPrompt(product, result.tags), referenceImages: [referenceImage], ratio: state.studio.ratio }),
+  });
+  result.taskId = task.taskId;
+  result.status = 'loading';
+  result.error = '';
+}
+
+async function runWithConcurrency(items, concurrency, operation) {
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const item = items[cursor];
+      cursor += 1;
+      try {
+        await operation(item);
+      } catch (error) {
+        item.status = 'failed';
+        item.error = error.message;
+        if (error.code === 'AUTH_REQUIRED' || error.code === 'AUTH_INVALID') activeGenerationId = '';
+      }
+      saveState(); render();
+      if (!activeGenerationId) return;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+}
+
+async function pollQwenBatch(batchId) {
+  while (activeGenerationId === batchId) {
+    const pending = state.batch.results.filter((item) => item.taskId && item.status === 'loading');
+    if (!pending.length) break;
+    await runWithConcurrency(pending, 4, async (item) => {
+      const task = await apiJson(`/api/qwen/tasks/${encodeURIComponent(item.taskId)}`);
+      if (task.taskStatus === 'SUCCEEDED' && task.imageUrls?.length) {
+        item.image = task.imageUrls[0];
+        item.status = 'ready';
+        item.error = '';
+      } else if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(task.taskStatus)) {
+        item.status = 'failed';
+        item.error = task.error?.message || '模型未能完成这张图片，请重试。';
+      }
+    });
+    if (activeGenerationId !== batchId) break;
+    if (state.batch.results.some((item) => item.status === 'loading')) await sleep(QWEN_POLL_INTERVAL);
+  }
+  if (state.batch.id !== batchId) return;
+  activeGenerationId = '';
+  state.batch.status = batchReadyCount() ? 'ready' : 'failed';
+  saveState(); render();
+  if (batchReadyCount()) showToast('批量生成完成', `${batchReadyCount()} 张素材已生成${batchFailedCount() ? `，${batchFailedCount()} 张可重试` : ''}。请在 24 小时内下载。`, 'sparkles');
+  else showToast('本批次未生成图片', '请查看失败原因并逐张重试。', 'info');
+}
+
+async function startBatchGeneration() {
   const total = plannedTotal();
   if (!total || total > MAX_BATCH_SIZE) return;
   const cost = batchCost();
   if (state.credits < cost) { closeOverlay(); showToast('积分不足', `本次需要 ${cost} 积分，请减少组合数量。`, 'database'); return; }
+  const authorized = await checkQwenAuthorization();
+  if (!authorized) { closeOverlay(); openQwenAuthorization('studio'); return; }
   clearInterval(generationTimer);
   const combinations = buildCombinations();
-  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: RESULT_IMAGES[(productIndex + comboIndex) % RESULT_IMAGES.length], tags: combo.tags, status: 'loading', saved: false })));
+  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, status: 'queued', taskId: '', error: '', saved: false })));
   state.credits -= cost;
   state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', results, plannedTotal: total, startedAt: nowLabel(), savedAt: '' };
+  activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   saveState(); render();
-  let cursor = 0;
-  const step = Math.max(1, Math.ceil(results.length / 9));
-  generationTimer = setInterval(() => {
-    state.batch.results.slice(cursor, cursor + step).forEach((item) => { item.status = 'ready'; });
-    cursor += step;
-    if (cursor >= state.batch.results.length) { clearInterval(generationTimer); state.batch.status = 'ready'; showToast('批量生成完成', `${state.batch.results.length} 张素材已准备好，请检查后保存。`, 'sparkles'); }
-    saveState(); render();
-  }, 220);
+  await runWithConcurrency(results, QWEN_SUBMIT_CONCURRENCY, submitQwenResult);
+  if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
 }
 
-function regenerateResult(id) {
+async function regenerateResult(id) {
   const item = state.batch.results.find((result) => result.id === id);
-  if (!item || item.status === 'loading') return;
+  if (!item || item.status === 'loading' || item.status === 'queued') return;
   if (state.credits < CREDIT_PER_IMAGE) { showToast('积分不足', '无法重新生成当前素材。', 'database'); return; }
+  const authorized = await checkQwenAuthorization();
+  if (!authorized) { openQwenAuthorization('studio'); return; }
   state.credits -= CREDIT_PER_IMAGE;
-  item.status = 'loading'; render();
-  setTimeout(() => {
-    item.image = RESULT_IMAGES[(RESULT_IMAGES.indexOf(item.image) + 1 + RESULT_IMAGES.length) % RESULT_IMAGES.length];
-    item.status = 'ready'; item.saved = false;
-    saveState(); render(); showToast('单张素材已更新', '其他结果保持不变。', 'refresh');
-  }, 760);
+  item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false;
+  activeGenerationId = state.batch.id;
+  saveState(); render();
+  try {
+    await submitQwenResult(item);
+    await pollQwenBatch(state.batch.id);
+    if (item.status === 'ready') showToast('单张素材已更新', '其他结果保持不变，请及时下载。', 'refresh');
+  } catch (error) {
+    activeGenerationId = '';
+    item.status = 'failed'; item.error = error.message;
+    saveState(); render(); showToast('重新生成失败', error.message, 'info');
+  }
 }
 
 function saveBatch() {
@@ -466,13 +605,17 @@ document.addEventListener('click', async (event) => {
     if (!selectedProducts().length) { showToast('请先选择产品', '至少选择一个 SKU 才能开始生成。', 'box'); return; }
     rememberFocus(); state.ui.confirmBatch = true; render(); focusOverlay();
   }
-  if (action === 'confirm-batch') startBatchGeneration();
-  if (action === 'regenerate-result') regenerateResult(button.dataset.id);
+  if (action === 'confirm-batch') await startBatchGeneration();
+  if (action === 'regenerate-result') await regenerateResult(button.dataset.id);
   if (action === 'delete-result') { state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
   if (action === 'save-batch') saveBatch();
   if (action === 'use-template') { state.studio.templateId = button.dataset.id; setRoute('studio'); showToast('模板已加载', '提示词结构和输出规格已准备好。', 'grid'); }
   if (action === 'download-asset') downloadImage(button.dataset.image, button.dataset.name);
-  if (action === 'test-connection') showToast(`${button.dataset.provider}连接检查`, button.dataset.provider === 'Google Gemini' && state.connection.geminiConfigured ? '密钥已保存在服务端，等待模型权限。' : '请在服务端配置访问凭据。', 'database');
+  if (action === 'download-result') { const result = state.batch.results.find((item) => item.id === button.dataset.id); const product = result ? productById(result.productId) : null; if (result?.image) downloadImage(result.image, `${product?.sku || 'Qwen'}-${state.batch.id}`); }
+  if (action === 'authorize-qwen') {
+    if (await checkQwenAuthorization()) showToast('千问连接正常', `已通过 Cloudflare Access 授权，模型为 ${state.connection.model}。`, 'check');
+    else openQwenAuthorization('connections');
+  }
   if (action === 'shutdown-app') { button.disabled = true; showToast('正在退出', '产品、词组与生成状态已保存。', 'power'); try { await fetch('/api/shutdown', { method: 'POST' }); } catch { /* desktop host may close */ } }
 });
 
