@@ -223,6 +223,7 @@ textarea { min-height: 120px; padding: 11px; resize: vertical; font-size: 12px; 
 .connection-trust { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 9px 10px; color: var(--green); background: var(--green-bg); border-radius: 10px; font-size: 10px; font-weight: 800; }
 .connection-trust svg { width: 16px; flex: 0 0 auto; }
 .connection-card > .button { width: 100%; }
+.connection-card > .connection-clear { margin-top: 8px; }
 .connection-note, .connection-copy { margin: 11px 0 0; color: var(--ink-500); font-size: 9px; line-height: 1.55; }
 .export-card svg { width: 25px; color: var(--purple-600); }
 .export-card h3 { margin: 18px 0 5px; }
@@ -534,6 +535,16 @@ body.overlay-open { overflow: hidden; }
 .confirm-summary span { color: var(--ink-500); font-size: 9px; }
 .confirm-summary strong { font-size: 10px; font-variant-numeric: tabular-nums; }
 .confirm-dialog .modal-actions { justify-content: center; }
+.key-dialog { width: min(480px, 100%); }
+.key-dialog .modal-header { align-items: flex-start; }
+.key-dialog .modal-header h2, .key-dialog .modal-header p { margin: 0; }
+.key-dialog .modal-header p { margin-top: 5px; color: var(--ink-500); font-size: 10px; }
+.key-field { display: grid; gap: 7px; }
+.key-field > span { color: var(--ink-700); font-size: 10px; font-weight: 800; }
+.key-field .input-control { min-height: 48px; padding-inline: 13px; letter-spacing: .04em; }
+.key-privacy { display: flex; align-items: center; gap: 7px; margin-top: 12px; padding: 10px 11px; color: var(--green); background: var(--green-bg); border-radius: 10px; font-size: 10px; font-weight: 700; }
+.key-privacy svg { width: 16px; flex: 0 0 auto; }
+.field-error { margin: 8px 0 0; color: var(--red); font-size: 10px; line-height: 1.5; }
 .empty-inline { grid-column: 1 / -1; padding: 24px; color: var(--ink-500); background: var(--surface-soft); border-radius: 10px; font-size: 10px; text-align: center; }
 .metric-list { display: grid; gap: 0; }
 .metric-list div { display: flex; align-items: center; justify-content: space-between; min-height: 62px; border-top: 1px solid var(--line); }

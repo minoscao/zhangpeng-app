@@ -6,7 +6,7 @@
 
 1. 从空白、上传参考图或产品库 SKU 发起设计
 2. 文生图、图生图和多图融合任务切换
-3. 多模型连接与服务端密钥托管
+3. 首次生成时输入千问密钥，当前标签页临时使用
 4. 产品库、素材库、设计版本和导出记录分离
 5. 帐篷设计、通用商品图、场景换图和电商白底图模板
 6. 本地状态保存与 Windows EXE 构建
@@ -25,13 +25,9 @@
 
 ## 配置千问图像模型
 
-线上使用阿里千问 `qwen-image-3.0-pro`，通过 Cloudflare Worker 服务端代理调用。API Key 只能保存为 Worker Secret：
+线上使用阿里千问 `qwen-image-3.0-pro`，通过 Cloudflare Worker 无状态转发。首次点击生成时，页面会弹窗要求输入 API Key；密钥只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后自动清除。密钥不会写入 GitHub、Cloudflare Secret、`.env` 或应用长期状态。
 
-```powershell
-wrangler secret put QWEN_API_KEY
-```
-
-生成接口为 `/api/qwen/*`，必须由 Cloudflare Access 保护，并在 Worker 中再次校验 Access JWT。Access 应用创建后，将团队域名前缀和应用 Audience 写入 `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`。完整密钥不会发送到浏览器、状态文件或 GitHub。
+浏览器在每次生成与任务查询时通过 HTTPS 把密钥发送给 Worker，Worker 只负责转发，不持久化、不返回密钥。设置页可随时更换或清除本标签页中的密钥。
 
 批量创作会把 SKU 产品图作为参考图，通过异步任务生成并轮询结果。单批最多 24 张、提交并发为 2。阿里返回的图片 URL 仅在 24 小时内有效，生成后应及时下载。
 
@@ -68,7 +64,7 @@ wrangler deploy --dry-run
 wrangler deploy --keep-vars
 ```
 
-Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责受保护的千问接口；`app/assets/studio/` 保存线上工作台图片。
+Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责无状态转发千问接口；`app/assets/studio/` 保存线上工作台图片。不需要配置 Cloudflare Access 或模型密钥 Secret。
 
 ## 目录
 

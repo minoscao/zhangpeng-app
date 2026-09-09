@@ -30,18 +30,10 @@ class MarkupAudit(HTMLParser):
 
 class DesignFlowTests(unittest.TestCase):
     def test_public_api_config_never_exposes_key(self):
-        original_qwen = server.os.environ.get("QWEN_API_KEY")
-        try:
-            server.os.environ["QWEN_API_KEY"] = "test-secret-1234"
-            config = server.public_api_config()
-            self.assertTrue(config["qwenConfigured"])
-            self.assertEqual(config["model"], "qwen-image-3.0-pro")
-            self.assertNotIn("test-secret", json.dumps(config))
-        finally:
-            if original_qwen is None:
-                server.os.environ.pop("QWEN_API_KEY", None)
-            else:
-                server.os.environ["QWEN_API_KEY"] = original_qwen
+        config = server.public_api_config()
+        self.assertTrue(config["userKeyRequired"])
+        self.assertEqual(config["model"], "qwen-image-3.0-pro")
+        self.assertNotIn("apiKey", json.dumps(config))
 
     def test_required_files_exist(self):
         for relative in ("app/index.html", "app/styles.css", "app/app-v2.js", "worker.js", "server.py", "start.ps1", "dist/DesignFlow Studio.exe"):
@@ -108,12 +100,15 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIn("prefers-reduced-motion: reduce", css)
         self.assertIn("min-height: 44px", css)
 
-    def test_qwen_worker_uses_server_secrets_and_access(self):
+    def test_qwen_key_is_session_only_and_worker_is_stateless(self):
         worker = (ROOT / "worker.js").read_text(encoding="utf-8")
         client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
-        self.assertIn("env.QWEN_API_KEY", worker)
-        self.assertIn("Cf-Access-Jwt-Assertion", worker)
-        self.assertIn("crypto.subtle.verify", worker)
+        self.assertIn("X-Qwen-Api-Key", worker)
+        self.assertIn("/compatible-mode/v1/models", worker)
+        self.assertNotIn("env.QWEN_API_KEY", worker)
+        self.assertNotIn("Cf-Access-Jwt-Assertion", worker)
+        self.assertIn("sessionStorage", client)
+        self.assertNotIn("localStorage.setItem(QWEN_KEY_STORAGE", client)
         self.assertIn("qwen-image-3.0-pro", worker)
         self.assertIn("/api/qwen/generate", client)
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
