@@ -76,6 +76,14 @@ function upstreamErrorMessage(data, status) {
   return detail ? String(detail).slice(0, 240) : '千问模型暂时无法处理请求，请稍后重试。';
 }
 
+function qwenImageUrls(output) {
+  const legacyUrls = Array.isArray(output?.results) ? output.results.map((item) => item?.url) : [];
+  const choiceUrls = Array.isArray(output?.choices)
+    ? output.choices.flatMap((choice) => Array.isArray(choice?.message?.content) ? choice.message.content.map((item) => item?.image) : [])
+    : [];
+  return [...new Set([...choiceUrls, ...legacyUrls].filter((value) => typeof value === 'string' && /^https:\/\//i.test(value)))];
+}
+
 async function validateQwenKey(apiKey, env) {
   const upstream = await fetch(env.DASHSCOPE_MODELS_URL || DASHSCOPE_MODELS_URL, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -149,7 +157,7 @@ async function getQwenTask(taskId, env, apiKey) {
     return jsonResponse({ error: { code: data?.code || 'QWEN_TASK_ERROR', message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 502);
   }
   const output = data.output || {};
-  const imageUrls = Array.isArray(output.results) ? output.results.map((item) => item?.url).filter(Boolean) : [];
+  const imageUrls = qwenImageUrls(output);
   return jsonResponse({
     taskId,
     taskStatus: output.task_status || 'UNKNOWN',

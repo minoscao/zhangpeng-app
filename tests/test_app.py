@@ -118,6 +118,12 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIn("FileReader", client)
         self.assertNotIn("new URL(product.image, location.origin).href", client)
         self.assertIn("Failed to download image URL", worker)
+        self.assertIn("output?.choices", worker)
+        self.assertIn("choice.message.content", worker)
+        self.assertIn("QWEN_TASK_TIMEOUT_MS", client)
+        self.assertIn("checkExistingResult", client)
+        self.assertIn("resumePendingBatch", client)
+        self.assertIn("task.taskStatus === 'SUCCEEDED'", client)
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
 
     def test_state_roundtrip(self):

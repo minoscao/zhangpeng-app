@@ -37,6 +37,7 @@ const CREDIT_PER_IMAGE = 3;
 const MAX_BATCH_SIZE = 24;
 const QWEN_POLL_INTERVAL = 10000;
 const QWEN_SUBMIT_CONCURRENCY = 2;
+const QWEN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
@@ -175,8 +176,17 @@ function batchCost() { return plannedTotal() * CREDIT_PER_IMAGE; }
 function productAssets(id) { return state.savedAssets.filter((asset) => asset.productId === id); }
 function batchReadyCount() { return state.batch.results.filter((item) => item.status === 'ready').length; }
 function batchFailedCount() { return state.batch.results.filter((item) => item.status === 'failed').length; }
+function batchDelayedCount() { return state.batch.results.filter((item) => item.status === 'delayed').length; }
 function batchSettledCount() { return batchReadyCount() + batchFailedCount(); }
 function batchProgress() { return state.batch.results.length ? Math.round((batchSettledCount() / state.batch.results.length) * 100) : 0; }
+function elapsedMinutes(startedAt, finishedAt = 0) { return startedAt ? Math.max(1, Math.ceil(((finishedAt || Date.now()) - startedAt) / 60000)) : 0; }
+function batchStatusLabel() {
+  if (state.batch.status === 'generating') return '生成中';
+  if (state.batch.status === 'delayed') return '等待超时';
+  if (state.batch.status === 'saved') return '已完成';
+  if (batchFailedCount() && !batchReadyCount()) return '生成失败';
+  return '待保存';
+}
 
 function setRoute(route, focus = true, persist = true) {
   if (!routeMeta[route]) route = 'home';
@@ -250,8 +260,9 @@ function renderResultGroups() {
     const failed = items.filter((item) => item.status === 'failed').length;
     return `<section class="result-product-group"><header><div><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.sku)}</strong><small>${completed}/${items.length} 已完成${failed ? ` · ${failed} 张需重试` : ''}</small></span></div></header><div class="result-grid">${items.map((item, index) => {
       const label = variantLabel(index);
+      if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error"><strong>${label} 生成失败</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="regenerate-result" data-id="${item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton"><span>${label}</span><small>${item.status === 'queued' ? '等待模型' : '生成中'}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton"><span>${label}</span><small>${item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       return `<article class="result-card"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"><span class="result-code">${label}</span><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
@@ -261,6 +272,8 @@ function renderStudio() {
   const total = plannedTotal();
   const progress = batchProgress();
   const batchActive = state.batch.results.length > 0;
+  const batchRunning = state.batch.status === 'generating';
+  const durationValue = batchActive ? `${elapsedMinutes(state.batch.startedAtMs, state.batch.finishedAtMs)} 分钟` : `${Math.max(1, Math.ceil(total / 12))} 分钟`;
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
@@ -268,8 +281,8 @@ function renderStudio() {
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
-    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)}` : 'Qwen Image 3.0 Pro · 首次使用输入密钥'}</p></div>${batchActive ? statusChip(state.batch.status === 'generating' ? '生成中' : state.batch.status === 'saved' ? '已完成' : batchFailedCount() && !batchReadyCount() ? '生成失败' : '待保存') : ''}</div>
-    <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>预计耗时</small><strong>${Math.max(1, Math.ceil((batchActive ? state.batch.results.length : total) / 12))} 分钟</strong></span></div></div>
+    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)}` : 'Qwen Image 3.0 Pro · 首次使用输入密钥'}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
+    <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
     <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
     <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>千问结果链接仅保留 24 小时，请生成后及时下载；保存会保留 SKU 与提示词记录。</p></div>` : ''}
   </aside></div></section>`;
@@ -521,6 +534,8 @@ async function submitQwenResult(result) {
   });
   result.taskId = task.taskId;
   result.status = 'loading';
+  result.submittedAt = Date.now();
+  result.remoteStatus = task.taskStatus || 'PENDING';
   result.error = '';
 }
 
@@ -550,13 +565,23 @@ async function pollQwenBatch(batchId) {
     if (!pending.length) break;
     await runWithConcurrency(pending, 4, async (item) => {
       const task = await apiJson(`/api/qwen/tasks/${encodeURIComponent(item.taskId)}`);
-      if (task.taskStatus === 'SUCCEEDED' && task.imageUrls?.length) {
-        item.image = task.imageUrls[0];
-        item.status = 'ready';
-        item.error = '';
+      item.submittedAt ||= Date.now();
+      item.remoteStatus = task.taskStatus;
+      if (task.taskStatus === 'SUCCEEDED') {
+        if (task.imageUrls?.length) {
+          item.image = task.imageUrls[0];
+          item.status = 'ready';
+          item.error = '';
+        } else {
+          item.status = 'failed';
+          item.error = '千问任务已完成，但响应中没有图片，请重试。';
+        }
       } else if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(task.taskStatus)) {
         item.status = 'failed';
         item.error = task.error?.message || '模型未能完成这张图片，请重试。';
+      } else if (Date.now() - item.submittedAt >= QWEN_TASK_TIMEOUT_MS) {
+        item.status = 'delayed';
+        item.error = '已等待 10 分钟，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
       }
     });
     if (activeGenerationId !== batchId) break;
@@ -564,9 +589,11 @@ async function pollQwenBatch(batchId) {
   }
   if (state.batch.id !== batchId) return;
   activeGenerationId = '';
-  state.batch.status = batchReadyCount() ? 'ready' : 'failed';
+  state.batch.finishedAtMs = Date.now();
+  state.batch.status = batchDelayedCount() ? 'delayed' : batchReadyCount() ? 'ready' : 'failed';
   saveState(); render();
-  if (batchReadyCount()) showToast('批量生成完成', `${batchReadyCount()} 张素材已生成${batchFailedCount() ? `，${batchFailedCount()} 张可重试` : ''}。请在 24 小时内下载。`, 'sparkles');
+  if (batchDelayedCount()) showToast('千问任务等待时间较长', `${batchDelayedCount()} 张保留了原任务，可点击“查询结果”，不会重复扣分。`, 'info');
+  else if (batchReadyCount()) showToast('批量生成完成', `${batchReadyCount()} 张素材已生成${batchFailedCount() ? `，${batchFailedCount()} 张可重试` : ''}。请在 24 小时内下载。`, 'sparkles');
   else showToast('本批次未生成图片', '请查看失败原因并逐张重试。', 'info');
 }
 
@@ -580,9 +607,9 @@ async function startBatchGeneration() {
   if (!authorized) { openQwenKeyDialog('generate'); keyDialogError = '密钥无效或已失效，请重新输入。'; render(); return; }
   clearInterval(generationTimer);
   const combinations = buildCombinations();
-  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, status: 'queued', taskId: '', error: '', saved: false })));
+  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
   state.credits -= cost;
-  state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', results, plannedTotal: total, startedAt: nowLabel(), savedAt: '' };
+  state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   saveState(); render();
@@ -610,6 +637,41 @@ async function regenerateResult(id) {
     item.status = 'failed'; item.error = error.message;
     saveState(); render(); showToast('重新生成失败', error.message, 'info');
   }
+}
+
+async function checkExistingResult(id) {
+  const item = state.batch.results.find((result) => result.id === id);
+  if (!item?.taskId || item.status === 'loading' || item.status === 'queued') return;
+  if (!getQwenApiKey()) { openQwenKeyDialog(`check-result:${id}`); return; }
+  const authorized = await checkQwenAuthorization(false);
+  if (!authorized) { openQwenKeyDialog(`check-result:${id}`); keyDialogError = '密钥无效或已失效，请重新输入。'; render(); return; }
+  item.status = 'loading';
+  item.submittedAt = Date.now();
+  state.batch.status = 'generating';
+  state.batch.finishedAtMs = 0;
+  activeGenerationId = state.batch.id;
+  saveState(); render();
+  await pollQwenBatch(state.batch.id);
+}
+
+async function resumePendingBatch() {
+  if (state.batch.status !== 'generating') return;
+  state.batch.startedAtMs ||= Date.now();
+  const interrupted = state.batch.results.filter((item) => item.status === 'queued' && !item.taskId);
+  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在任务提交期间中断，请重新生成此图片。'; });
+  const pending = state.batch.results.filter((item) => item.status === 'loading' && item.taskId);
+  if (!pending.length) {
+    state.batch.finishedAtMs ||= Date.now();
+    state.batch.status = batchReadyCount() ? 'ready' : 'failed';
+    saveState(); render();
+    return;
+  }
+  if (!getQwenApiKey()) { openQwenKeyDialog('resume'); return; }
+  const authorized = await checkQwenAuthorization(false);
+  if (!authorized) { openQwenKeyDialog('resume'); keyDialogError = '请输入原任务使用的有效密钥以继续查询，不会创建新任务。'; render(); return; }
+  activeGenerationId = state.batch.id;
+  pending.forEach((item) => { item.submittedAt ||= Date.now(); });
+  await pollQwenBatch(state.batch.id);
 }
 
 function saveBatch() {
@@ -694,6 +756,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'confirm-batch') await startBatchGeneration();
   if (action === 'regenerate-result') await regenerateResult(button.dataset.id);
+  if (action === 'check-result') await checkExistingResult(button.dataset.id);
   if (action === 'delete-result') { state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
   if (action === 'save-batch') saveBatch();
   if (action === 'use-template') { state.studio.templateId = button.dataset.id; setRoute('studio'); showToast('模板已加载', '提示词结构和输出规格已准备好。', 'grid'); }
@@ -734,6 +797,8 @@ document.addEventListener('click', async (event) => {
     showToast('千问连接正常', `密钥已验证，当前模型为 ${state.connection.model}。`, 'check');
     if (nextAction === 'generate') await startBatchGeneration();
     if (nextAction.startsWith('regenerate:')) await regenerateResult(nextAction.slice('regenerate:'.length));
+    if (nextAction.startsWith('check-result:')) await checkExistingResult(nextAction.slice('check-result:'.length));
+    if (nextAction === 'resume') await resumePendingBatch();
   }
   if (action === 'shutdown-app') { button.disabled = true; showToast('正在退出', '产品、词组与生成状态已保存。', 'power'); try { await fetch('/api/shutdown', { method: 'POST' }); } catch { /* desktop host may close */ } }
 });
@@ -792,4 +857,5 @@ $('#mobile-menu').addEventListener('click', () => {
   await loadState();
   const refreshedRoute = location.hash.slice(1);
   setRoute(routeMeta[refreshedRoute] ? refreshedRoute : (state.ui.route || 'products'), false, false);
+  await resumePendingBatch();
 })();
