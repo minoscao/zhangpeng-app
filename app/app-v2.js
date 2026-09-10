@@ -38,6 +38,8 @@ const MAX_BATCH_SIZE = 24;
 const QWEN_POLL_INTERVAL = 10000;
 const QWEN_SUBMIT_CONCURRENCY = 2;
 const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
+const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
+const referenceImageCache = new Map();
 
 function hydrateIcons(scope = document) {
   $$('[data-icon]', scope).forEach((el) => { el.innerHTML = svgIcon(el.dataset.icon); });
@@ -471,10 +473,47 @@ function generationPrompt(product, tags) {
   ].filter(Boolean).join('\n');
 }
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('无法读取参考产品图，请重新上传后再试。'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function referenceImageForQwen(product) {
+  if (product.image.startsWith('data:image/')) return product.image;
+  if (referenceImageCache.has(product.image)) return referenceImageCache.get(product.image);
+
+  const imageDataPromise = (async () => {
+    let response;
+    try {
+      response = await fetch(new URL(product.image, location.origin), { cache: 'force-cache' });
+    } catch {
+      throw new Error('无法读取参考产品图，请检查网络后重试。');
+    }
+    if (!response.ok) throw new Error('参考产品图加载失败，请刷新页面或重新上传底图。');
+
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('参考产品图格式无效，请重新上传图片。');
+    if (blob.size > MAX_REFERENCE_IMAGE_BYTES) throw new Error('参考产品图超过 8MB，请压缩后重新上传。');
+    return blobToDataUrl(blob);
+  })();
+
+  referenceImageCache.set(product.image, imageDataPromise);
+  try {
+    return await imageDataPromise;
+  } catch (error) {
+    referenceImageCache.delete(product.image);
+    throw error;
+  }
+}
+
 async function submitQwenResult(result) {
   const product = productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
-  const referenceImage = product.image.startsWith('data:image/') ? product.image : new URL(product.image, location.origin).href;
+  const referenceImage = await referenceImageForQwen(product);
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -114,6 +114,10 @@ class DesignFlowTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem(QWEN_KEY_STORAGE", client)
         self.assertIn("qwen-image-3.0-pro", worker)
         self.assertIn("/api/qwen/generate", client)
+        self.assertIn("referenceImageForQwen", client)
+        self.assertIn("FileReader", client)
+        self.assertNotIn("new URL(product.image, location.origin).href", client)
+        self.assertIn("Failed to download image URL", worker)
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
 
     def test_state_roundtrip(self):

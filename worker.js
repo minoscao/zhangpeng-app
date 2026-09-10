@@ -68,10 +68,12 @@ function validateReferenceImages(images, requestUrl) {
 }
 
 function upstreamErrorMessage(data, status) {
+  const detail = data?.message || data?.error?.message || '';
   if (status === 429 || data?.code === 'Throttling') return '模型请求过于频繁，请稍后重试。';
   if (data?.code === 'DataInspectionFailed') return '提示词或参考图未通过内容安全检查，请调整后重试。';
   if (status === 401 || data?.code === 'InvalidApiKey') return '密钥无效或已失效，请重新输入。';
-  return data?.message ? String(data.message).slice(0, 240) : '千问模型暂时无法处理请求，请稍后重试。';
+  if (/Failed to download image URL/i.test(detail)) return '参考产品图无法被模型读取，请重新上传底图后重试。';
+  return detail ? String(detail).slice(0, 240) : '千问模型暂时无法处理请求，请稍后重试。';
 }
 
 async function validateQwenKey(apiKey, env) {
