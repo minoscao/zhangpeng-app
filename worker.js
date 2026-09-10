@@ -34,8 +34,10 @@ function publicConfig(env) {
 }
 
 function qwenApiKey(request) {
-  const key = (request.headers.get('X-Qwen-Api-Key') || '').trim();
-  return /^sk-[A-Za-z0-9_-]{20,200}$/.test(key) ? key : '';
+  const key = (request.headers.get('X-Qwen-Api-Key') || '')
+    .replace(/\\([_.-])/g, '$1')
+    .replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
+  return /^sk-[A-Za-z0-9._-]{16,512}$/.test(key) ? key : '';
 }
 
 async function readJsonBody(request) {

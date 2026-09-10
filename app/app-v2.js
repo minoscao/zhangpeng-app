@@ -153,6 +153,14 @@ function clearQwenApiKey() {
   state.connection.authenticated = false;
 }
 
+function normalizeQwenApiKey(value) {
+  return String(value || '').replace(/\\([_.-])/g, '$1').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
+}
+
+function isQwenApiKey(value) {
+  return /^sk-[A-Za-z0-9._-]{16,512}$/.test(value);
+}
+
 const routeMeta = { home: ['工作台总览', '首页'], studio: ['批量素材生产', '创建设计'], products: ['SKU 与真实底图', '产品库'], templates: ['复用生产规则', '模板中心'], assets: ['全部二维图片', '素材库'], exports: ['交付与下载', '导出中心'], connections: ['生成服务', '模型连接'] };
 function productById(id) { return state.products.find((item) => item.id === id); }
 function selectedProducts() { return state.studio.selectedProductIds.map(productById).filter(Boolean); }
@@ -324,7 +332,7 @@ function renderConfirmDialog() {
 
 function renderQwenKeyDialog() {
   if (!keyDialogOpen) return '';
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入千问 API Key</h2><p id="key-dialog-help">仅用于当前浏览器标签页，关闭标签页后自动清除。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="qwen-api-key"><span>API Key</span><input id="qwen-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-••••••••••••••••" value="${escapeHtml(getQwenApiKey())}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态。</div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-qwen-key">验证并使用</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入千问 API Key</h2><p id="key-dialog-help">支持 sk- 和 sk-ws- 格式，仅用于当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="qwen-api-key"><span>API Key</span><input id="qwen-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整的 sk- 或 sk-ws- 密钥" value="${escapeHtml(getQwenApiKey())}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-qwen-key">验证并使用</button></div></section></div>`;
 }
 
 function renderOverlays() {
@@ -662,9 +670,9 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'save-qwen-key') {
     const input = $('#qwen-api-key');
-    const apiKey = input?.value.trim() || '';
-    if (!/^sk-[A-Za-z0-9_-]{20,200}$/.test(apiKey)) {
-      keyDialogError = '请输入以 sk- 开头的完整千问 API Key。';
+    const apiKey = normalizeQwenApiKey(input?.value);
+    if (!isQwenApiKey(apiKey)) {
+      keyDialogError = '请输入完整的千问 API Key，支持 sk- 和 sk-ws- 开头的密钥。';
       render(); requestAnimationFrame(() => $('#qwen-api-key')?.focus()); return;
     }
     if (!setQwenApiKey(apiKey)) {
