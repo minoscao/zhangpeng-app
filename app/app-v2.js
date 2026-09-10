@@ -109,6 +109,7 @@ let lastFocusedElement = null;
 let keyDialogOpen = false;
 let keyDialogError = '';
 let pendingKeyAction = '';
+let imagePreview = null;
 
 function applySavedState(saved) {
   if (saved?.schemaVersion !== 6 || !Array.isArray(saved.products)) return;
@@ -263,7 +264,7 @@ function renderResultGroups() {
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error"><strong>${label} 生成失败</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="regenerate-result" data-id="${item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton"><span>${label}</span><small>${item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      return `<article class="result-card"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"><span class="result-code">${label}</span><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"></button><span class="result-code">${label}</span><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
 }
@@ -298,7 +299,7 @@ function renderTemplates() {
 
 function renderAssets() {
   const assets = state.savedAssets;
-  return `<section class="page">${pageHeading('素材库', '所有文件以二维图片形式保存，并保留 SKU、组合标签与批次信息。')}<div class="asset-library-grid">${assets.length ? assets.map((asset) => { const product = productById(asset.productId); return `<article class="asset-card"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product?.name || '产品')}生成素材"><div class="card-body"><h3>${escapeHtml(product?.sku || '未关联 SKU')}</h3><p>${asset.tags.map(escapeHtml).join(' · ')}</p><div class="card-meta"><span class="tag">${escapeHtml(asset.batchId)}</span><button class="button button--quiet" data-action="download-asset" data-image="${escapeHtml(asset.image)}" data-name="${escapeHtml(product?.sku || '设计素材')}">${svgIcon('download')}下载</button></div></div></article>`; }).join('') : '<div class="empty-state">还没有已保存素材，请先完成一个批量任务。</div>'}</div></section>`;
+  return `<section class="page">${pageHeading('素材库', '所有文件以二维图片形式保存，并保留 SKU、组合标签与批次信息。')}<div class="asset-library-grid">${assets.length ? assets.map((asset) => { const product = productById(asset.productId); return `<article class="asset-card"><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product?.name || '产品')}生成素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product?.name || '产品')}生成素材"></button><div class="card-body"><h3>${escapeHtml(product?.sku || '未关联 SKU')}</h3><p>${asset.tags.map(escapeHtml).join(' · ')}</p><div class="card-meta"><span class="tag">${escapeHtml(asset.batchId)}</span><button class="button button--quiet" data-action="download-asset" data-image="${escapeHtml(asset.image)}" data-name="${escapeHtml(product?.sku || '设计素材')}">${svgIcon('download')}下载</button></div></div></article>`; }).join('') : '<div class="empty-state">还没有已保存素材，请先完成一个批量任务。</div>'}</div></section>`;
 }
 
 function renderExports() {
@@ -318,7 +319,7 @@ function renderProductDrawer() {
   const filterOptions = ['全部', ...new Set(assets.flatMap((asset) => asset.tags))];
   const filtered = state.ui.assetFilter === '全部' ? assets : assets.filter((asset) => asset.tags.includes(state.ui.assetFilter));
   const info = `<div class="drawer-info"><div class="base-image-stage"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}真实白底图"><span>${svgIcon('check')}真实产品底图</span></div><dl class="spec-list"><div><dt>SKU</dt><dd>${escapeHtml(product.sku)}</dd></div><div><dt>产品品类</dt><dd>${escapeHtml(product.category)}</dd></div><div><dt>尺寸</dt><dd>${escapeHtml(product.specs.size)}</dd></div><div><dt>面料</dt><dd>${escapeHtml(product.specs.material)}</dd></div><div><dt>颜色</dt><dd>${escapeHtml(product.specs.color)}</dd></div><div><dt>适用范围</dt><dd>${escapeHtml(product.specs.audience)}</dd></div><div><dt>透气结构</dt><dd>${escapeHtml(product.specs.windows)}</dd></div></dl></div>`;
-  const history = `<div class="drawer-assets"><div class="drawer-dashboard"><div><strong>${assets.length}</strong><span>历史素材</span></div><div><strong>${new Set(assets.map((asset) => asset.batchId)).size}</strong><span>生成批次</span></div><div><strong>${product.updated}</strong><span>最近更新</span></div></div><div class="drawer-filter"><label>${svgIcon('filter')}<select id="asset-filter" aria-label="筛选素材标签">${filterOptions.map((item) => `<option ${item === state.ui.assetFilter ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></label><span>${filtered.length} 张结果</span></div><div class="drawer-asset-grid">${filtered.length ? filtered.map((asset) => `<article><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product.name)}素材"><strong>${asset.tags.map(escapeHtml).join(' · ')}</strong><span>${escapeHtml(asset.batchId)} · ${escapeHtml(asset.createdAt)}</span></article>`).join('') : '<div class="empty-inline">当前筛选条件下没有素材。</div>'}</div></div>`;
+  const history = `<div class="drawer-assets"><div class="drawer-dashboard"><div><strong>${assets.length}</strong><span>历史素材</span></div><div><strong>${new Set(assets.map((asset) => asset.batchId)).size}</strong><span>生成批次</span></div><div><strong>${product.updated}</strong><span>最近更新</span></div></div><div class="drawer-filter"><label>${svgIcon('filter')}<select id="asset-filter" aria-label="筛选素材标签">${filterOptions.map((item) => `<option ${item === state.ui.assetFilter ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></label><span>${filtered.length} 张结果</span></div><div class="drawer-asset-grid">${filtered.length ? filtered.map((asset) => `<article><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product.name)}素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product.name)}素材"></button><strong>${asset.tags.map(escapeHtml).join(' · ')}</strong><span>${escapeHtml(asset.batchId)} · ${escapeHtml(asset.createdAt)}</span></article>`).join('') : '<div class="empty-inline">当前筛选条件下没有素材。</div>'}</div></div>`;
   return `<div class="drawer-backdrop" data-action="close-overlay"><aside class="product-drawer overlay-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-header"><div><span>${escapeHtml(product.sku)}</span><h2 id="drawer-title">${escapeHtml(product.name)}</h2></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭产品详情">${svgIcon('x')}</button></header><div class="drawer-tabs" role="tablist" aria-label="产品详情"><button role="tab" aria-selected="${state.ui.drawerTab === 'info'}" data-action="set-drawer-tab" data-tab="info">产品信息</button><button role="tab" aria-selected="${state.ui.drawerTab === 'assets'}" data-action="set-drawer-tab" data-tab="assets">已生成素材 <span>${assets.length}</span></button></div><div class="drawer-body">${state.ui.drawerTab === 'info' ? info : history}</div><footer class="drawer-footer"><button class="button button--secondary" data-action="set-drawer-tab" data-tab="assets">查看历史素材</button><button class="button button--primary" data-action="drawer-generate" data-id="${product.id}">${svgIcon('sparkles')}用此产品生成素材</button></footer></aside></div>`;
 }
 
@@ -350,9 +351,14 @@ function renderQwenKeyDialog() {
   return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入千问 API Key</h2><p id="key-dialog-help">支持 sk- 和 sk-ws- 格式，仅用于当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="qwen-api-key"><span>API Key</span><input id="qwen-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整的 sk- 或 sk-ws- 密钥" value="${escapeHtml(getQwenApiKey())}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-qwen-key">验证并使用</button></div></section></div>`;
 }
 
+function renderImagePreview() {
+  if (!imagePreview) return '';
+  return `<div class="image-preview-backdrop" data-action="close-image-preview"><section class="image-preview-panel overlay-panel" role="dialog" aria-modal="true" aria-labelledby="image-preview-title"><header><div><h2 id="image-preview-title">${escapeHtml(imagePreview.title)}</h2><p>${escapeHtml(imagePreview.meta)}</p></div><div class="image-preview-actions"><button class="button button--secondary" data-action="download-preview">${svgIcon('download')}下载原图</button><button class="icon-button overlay-close" data-action="close-image-preview" aria-label="关闭大图预览">${svgIcon('x')}</button></div></header><div class="image-preview-stage"><img src="${escapeHtml(imagePreview.image)}" alt="${escapeHtml(imagePreview.title)}大图"></div><p class="image-preview-hint">点击遮罩空白处或按 Esc 关闭</p></section></div>`;
+}
+
 function renderOverlays() {
   const root = $('#overlay-root');
-  root.innerHTML = renderQwenKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
+  root.innerHTML = renderImagePreview() || renderQwenKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
   document.body.classList.toggle('overlay-open', Boolean(root.innerHTML) || !$('#import-modal').hidden);
   hydrateIcons(root);
 }
@@ -368,6 +374,7 @@ function render() {
 function rememberFocus() { lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
 function focusOverlay() { requestAnimationFrame(() => $('.overlay-panel .overlay-close, .overlay-panel button, .overlay-panel input')?.focus()); }
 function closeOverlay() {
+  imagePreview = null;
   keyDialogOpen = false;
   keyDialogError = '';
   pendingKeyAction = '';
@@ -377,6 +384,32 @@ function closeOverlay() {
   state.ui.confirmBatch = false;
   render();
   requestAnimationFrame(() => lastFocusedElement?.focus());
+}
+
+function closeImagePreview() {
+  imagePreview = null;
+  render();
+  focusOverlay();
+}
+
+function previewResult(id) {
+  const result = state.batch.results.find((item) => item.id === id && item.status === 'ready' && item.image);
+  if (!result) return;
+  const product = productById(result.productId);
+  const productResults = state.batch.results.filter((item) => item.productId === result.productId);
+  const label = variantLabel(Math.max(0, productResults.indexOf(result)));
+  rememberFocus();
+  imagePreview = { image: result.image, title: `${product?.name || '生成素材'} · 方案 ${label}`, meta: `${product?.sku || '未关联 SKU'} · ${result.tags.join(' · ')}`, downloadName: `${product?.sku || 'Qwen'}-${state.batch.id}-${label}` };
+  render(); focusOverlay();
+}
+
+function previewAsset(id) {
+  const asset = state.savedAssets.find((item) => item.id === id);
+  if (!asset?.image) return;
+  const product = productById(asset.productId);
+  rememberFocus();
+  imagePreview = { image: asset.image, title: product?.name || '已生成素材', meta: `${product?.sku || '未关联 SKU'} · ${asset.tags.join(' · ')} · ${asset.batchId}`, downloadName: `${product?.sku || '设计素材'}-${asset.batchId}` };
+  render(); focusOverlay();
 }
 
 function openProductDrawer(id) {
@@ -698,10 +731,15 @@ document.addEventListener('click', async (event) => {
   if (!button) return;
   const action = button.dataset.action;
   if (action === 'close-overlay' && event.target !== button && button.classList.contains('drawer-backdrop')) return;
+  if (action === 'close-image-preview' && event.target !== button && button.classList.contains('image-preview-backdrop')) return;
   if (action === 'open-import') openImport();
   if (action === 'close-modal') closeImport();
   if (action === 'open-product-drawer') openProductDrawer(button.dataset.id);
   if (action === 'close-overlay') closeOverlay();
+  if (action === 'close-image-preview') closeImagePreview();
+  if (action === 'preview-result') previewResult(button.dataset.id);
+  if (action === 'preview-asset') previewAsset(button.dataset.id);
+  if (action === 'download-preview' && imagePreview) downloadImage(imagePreview.image, imagePreview.downloadName);
   if (action === 'set-drawer-tab') { state.ui.drawerTab = button.dataset.tab; state.ui.assetFilter = '全部'; render(); }
   if (action === 'drawer-generate') {
     if (!state.studio.selectedProductIds.includes(button.dataset.id)) state.studio.selectedProductIds.push(button.dataset.id);
@@ -826,7 +864,7 @@ document.addEventListener('change', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.table-row--interactive')) { event.preventDefault(); openProductDrawer(event.target.dataset.id); }
-  if (event.key === 'Escape') { if (!$('#import-modal').hidden) closeImport(); else if ($('#overlay-root').innerHTML) closeOverlay(); }
+  if (event.key === 'Escape') { if (imagePreview) closeImagePreview(); else if (!$('#import-modal').hidden) closeImport(); else if ($('#overlay-root').innerHTML) closeOverlay(); }
   if (event.key === 'Tab' && $('.overlay-panel')) {
     const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]', $('.overlay-panel')).filter((item) => item.offsetParent !== null);
     if (!focusable.length) return;

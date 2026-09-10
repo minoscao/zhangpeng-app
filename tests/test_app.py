@@ -124,6 +124,10 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIn("checkExistingResult", client)
         self.assertIn("resumePendingBatch", client)
         self.assertIn("task.taskStatus === 'SUCCEEDED'", client)
+        self.assertIn('data-action="preview-result"', client)
+        self.assertIn('data-action="preview-asset"', client)
+        self.assertIn("renderImagePreview", client)
+        self.assertIn("closeImagePreview", client)
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
 
     def test_state_roundtrip(self):
