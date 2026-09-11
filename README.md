@@ -6,7 +6,7 @@
 
 1. 从空白、上传参考图或产品库 SKU 发起设计
 2. 文生图、图生图和多图融合任务切换
-3. 首次生成时输入千问密钥，当前标签页临时使用
+3. 可切换 OpenAI 与千问；首次生成时输入对应密钥，当前标签页临时使用
 4. 产品库、素材库、设计版本和导出记录分离
 5. 帐篷设计、通用商品图、场景换图和电商白底图模板
 6. 本地状态保存与 Windows EXE 构建
@@ -23,13 +23,13 @@
 
 也可以运行 `dist/DesignFlow Studio.exe`。EXE 版本把数据保存在当前 Windows 用户的 `%LOCALAPPDATA%/DesignFlow Studio/data/`。
 
-## 配置千问图像模型
+## 配置 OpenAI 与千问图像模型
 
-线上使用阿里千问 `qwen-image-3.0-pro`，通过 Cloudflare Worker 无状态转发。首次点击生成时，页面会弹窗要求输入 API Key；密钥只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后自动清除。密钥不会写入 GitHub、Cloudflare Secret、`.env` 或应用长期状态。
+线上支持 OpenAI `gpt-image-2` / `gpt-image-2.5-sunburst` 与阿里千问 `qwen-image-3.0` / `qwen-image-3.0-pro`，通过 Cloudflare Worker 无状态转发。首次点击生成时，页面会弹窗要求输入当前通道的 API Key；密钥只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后自动清除。密钥不会写入 GitHub、Cloudflare Secret、`.env` 或应用长期状态。
 
-浏览器在每次生成与任务查询时通过 HTTPS 把密钥发送给 Worker，Worker 只负责转发，不持久化、不返回密钥。设置页可随时更换或清除本标签页中的密钥。
+浏览器在每次生成与任务查询时通过 HTTPS 把对应密钥发送给 Worker，Worker 只负责转发，不持久化、不返回密钥。模型连接页可分别更换或清除两个平台在本标签页中的密钥。
 
-批量创作会把 SKU 产品图作为参考图，通过异步任务生成并轮询结果。单批最多 24 张、提交并发为 2。阿里返回的图片 URL 仅在 24 小时内有效，生成后应及时下载。
+批量创作会把 SKU 产品图作为参考图。OpenAI 同步返回图片，千问通过异步任务生成并轮询结果；系统会按各平台的节奏分批提交。阿里返回的图片 URL 仅在 24 小时内有效，OpenAI 返回的图片只在当前标签页保留，因此两种通道都应在生成后及时下载。
 
 ## 数据对象
 
@@ -64,7 +64,7 @@ wrangler deploy --dry-run
 wrangler deploy --keep-vars
 ```
 
-Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责无状态转发千问接口；`app/assets/studio/` 保存线上工作台图片。不需要配置 Cloudflare Access 或模型密钥 Secret。
+Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责无状态转发 OpenAI 与千问接口；`app/assets/studio/` 保存线上工作台图片。不需要配置 Cloudflare Access 或模型密钥 Secret。
 
 ## 目录
 

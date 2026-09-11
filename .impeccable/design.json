@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-11T13:17:07+08:00",
+  "generatedAt": "2026-09-11T15:00:00+08:00",
   "title": "Design System: 创想设计平台",
   "extensions": {
     "colorMeta": {
@@ -84,8 +84,8 @@
     {
       "name": "Generation Mode Option",
       "kind": "custom",
-      "description": "快速出图和精细出图的互斥模式选择。",
-      "html": "<button class=\"ds-mode is-selected\"><span class=\"ds-mode-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg></span><span><strong>快速出图</strong><small>Qwen Image 3.0 · 优先缩短等待</small></span></button>",
+      "description": "不同模型通道下快速草图和精细成片的互斥模式选择。",
+      "html": "<button class=\"ds-mode is-selected\"><span class=\"ds-mode-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg></span><span><strong>快速草图</strong><small>GPT Image 2 · 快速确认构图</small></span></button>",
       "css": ".ds-mode{display:grid;min-height:78px;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:10px;padding:12px;color:var(--ink-800,#3f3b5c);background:#f8f7fc;border:1px solid var(--line,#e5e2ef);border-radius:12px;text-align:left;transition:background 180ms ease,border-color 180ms ease,box-shadow 180ms ease}.ds-mode:hover{background:#f3f1fc;border-color:#b9b3d8}.ds-mode.is-selected{background:var(--purple-50,#f4f2ff);border-color:var(--purple-600,#6658d6);box-shadow:0 5px 14px rgb(48 43 104 / 10%)}.ds-mode-icon{display:grid;width:38px;height:38px;place-items:center;color:var(--purple-700,#5145b4);background:#fff;border-radius:10px}.ds-mode-icon svg{width:19px}.ds-mode strong,.ds-mode small{display:block}.ds-mode small{margin-top:3px;color:var(--ink-600,#6d6982)}.ds-mode:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
     },
     {

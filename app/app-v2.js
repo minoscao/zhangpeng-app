@@ -38,11 +38,24 @@ const MAX_BATCH_SIZE = 24;
 const QWEN_POLL_INTERVAL = 8000;
 const QWEN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
+const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const GENERATION_PROFILES = Object.freeze({
-  fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20 }),
-  quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '开启深度思考，画质优先', submitLimit: 5 }),
+const PROVIDERS = Object.freeze({
+  openai: Object.freeze({
+    name: 'ChatGPT / OpenAI', shortName: 'OpenAI', keyStorage: OPENAI_KEY_STORAGE, keyLabel: 'OpenAI API Key', avatar: 'AI',
+    profiles: Object.freeze({
+      fast: Object.freeze({ name: '快速草图', model: 'GPT Image 2', code: 'gpt-image-2', detail: 'Low 质量，快速确认构图', submitLimit: 5, concurrency: 2 }),
+      quality: Object.freeze({ name: '精细成片', model: 'GPT Image 2.5', code: 'gpt-image-2.5-sunburst', detail: 'High 质量，适合白底图与交付素材', submitLimit: 5, concurrency: 2 }),
+    }),
+  }),
+  qwen: Object.freeze({
+    name: '阿里千问', shortName: '千问', keyStorage: QWEN_KEY_STORAGE, keyLabel: '千问 API Key', avatar: 'Q',
+    profiles: Object.freeze({
+      fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 5 }),
+      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '开启深度思考，画质优先', submitLimit: 5, concurrency: 5 }),
+    }),
+  }),
 });
 
 function hydrateIcons(scope = document) {
@@ -97,10 +110,10 @@ const seedState = {
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
     { id: 'group-style', name: '视觉风格', options: ['北欧自然', '轻奢柔光', '明亮电商', '户外纪实'] },
   ],
-  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。', generationMode: 'fast', model: 'qwen-image-3.0', ratio: '4:3' },
+  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。', provider: 'openai', generationMode: 'fast', model: 'gpt-image-2', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
   ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
-  connection: { provider: 'qwen', userKeyRequired: true, authenticated: false, model: 'qwen-image-3.0' },
+  connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
 };
 
 let state = structuredClone(seedState);
@@ -112,13 +125,17 @@ let lastFocusedElement = null;
 let keyDialogOpen = false;
 let keyDialogError = '';
 let pendingKeyAction = '';
+let keyDialogProvider = 'openai';
 let imagePreview = null;
 
 function applySavedState(saved) {
   if (saved?.schemaVersion !== 6 || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (!saved.studio?.generationMode) state.studio.generationMode = 'fast';
+  if (!saved.studio?.provider || !PROVIDERS[state.studio.provider]) state.studio.provider = 'openai';
   if (!saved.batch?.generationMode && saved.batch?.results?.length) state.batch.generationMode = 'quality';
+  if (saved.batch?.results?.length && !PROVIDERS[state.batch.provider]) state.batch.provider = 'qwen';
+  if (!state.connection.authenticated || typeof state.connection.authenticated !== 'object' || Array.isArray(state.connection.authenticated)) state.connection.authenticated = { openai: false, qwen: Boolean(state.connection.authenticated) };
 }
 
 function loadLocalState() {
@@ -134,9 +151,9 @@ async function loadState() {
     const response = await fetch('/api/config', { cache: 'no-store' });
     if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
       const config = await response.json();
-      state.connection.provider = config.provider || 'qwen';
+      state.connection.provider = config.provider || 'openai';
       state.connection.userKeyRequired = config.userKeyRequired !== false;
-      state.connection.model = config.model || 'qwen-image-3.0';
+      state.connection.model = config.model || 'gpt-image-2';
     }
   } catch { /* connection is optional */ }
 }
@@ -149,24 +166,26 @@ function saveState() {
   }, 180);
 }
 
-function getQwenApiKey() {
-  try { return sessionStorage.getItem(QWEN_KEY_STORAGE) || ''; } catch { return ''; }
+function providerConfig(provider = state.studio.provider) { return PROVIDERS[provider] || PROVIDERS.openai; }
+
+function getProviderApiKey(provider = state.studio.provider) {
+  try { return sessionStorage.getItem(providerConfig(provider).keyStorage) || ''; } catch { return ''; }
 }
 
-function setQwenApiKey(value) {
-  try { sessionStorage.setItem(QWEN_KEY_STORAGE, value); return true; } catch { return false; }
+function setProviderApiKey(provider, value) {
+  try { sessionStorage.setItem(providerConfig(provider).keyStorage, value); return true; } catch { return false; }
 }
 
-function clearQwenApiKey() {
-  try { sessionStorage.removeItem(QWEN_KEY_STORAGE); } catch { /* restricted browser storage */ }
-  state.connection.authenticated = false;
+function clearProviderApiKey(provider = state.studio.provider) {
+  try { sessionStorage.removeItem(providerConfig(provider).keyStorage); } catch { /* restricted browser storage */ }
+  state.connection.authenticated[provider] = false;
 }
 
-function normalizeQwenApiKey(value) {
+function normalizeApiKey(value) {
   return String(value || '').replace(/\\([_.-])/g, '$1').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
 }
 
-function isQwenApiKey(value) {
+function isProviderApiKey(value) {
   return /^sk-[A-Za-z0-9._-]{16,512}$/.test(value);
 }
 
@@ -179,10 +198,14 @@ function enabledGroups() { return state.promptGroups.filter((group) => group.ena
 function plannedTotal() { const products = selectedProducts().length; return products ? enabledGroups().reduce((total, group) => total * groupFactor(group), products) : 0; }
 function formulaText() { return [`${selectedProducts().length} 个产品`, ...enabledGroups().map((group) => `${groupFactor(group)} 个${group.name}`)].join(' × ') + ` = ${plannedTotal()} 张素材`; }
 function batchCost() { return plannedTotal() * CREDIT_PER_IMAGE; }
-function generationProfile(mode = state.studio.generationMode) { return GENERATION_PROFILES[mode] || GENERATION_PROFILES.fast; }
-function batchGenerationProfile() { return generationProfile(state.batch.generationMode || state.studio.generationMode); }
-function estimatedDuration(total, mode = state.studio.generationMode) {
+function generationProfile(mode = state.studio.generationMode, provider = state.studio.provider) { const profiles = providerConfig(provider).profiles; return profiles[mode] || profiles.fast; }
+function batchGenerationProfile() { return generationProfile(state.batch.generationMode || state.studio.generationMode, state.batch.provider || state.studio.provider); }
+function estimatedDuration(total, mode = state.studio.generationMode, provider = state.studio.provider) {
   if (!total) return '—';
+  if (provider === 'openai') {
+    const base = Math.max(1, Math.ceil(total / 2));
+    return `约 ${base}–${base * (mode === 'quality' ? 2 : 1) + 2} 分钟`;
+  }
   const base = mode === 'quality' ? Math.max(3, Math.ceil(total / 3)) : Math.max(1, Math.ceil(total / 8));
   return `约 ${base}–${base + (mode === 'quality' ? 4 : 2)} 分钟`;
 }
@@ -287,19 +310,22 @@ function renderStudio() {
   const batchActive = state.batch.results.length > 0;
   const batchRunning = state.batch.status === 'generating';
   const profile = batchActive ? batchGenerationProfile() : generationProfile();
+  const activeProvider = batchActive ? (state.batch.provider || 'qwen') : state.studio.provider;
+  const activeProviderConfig = providerConfig(activeProvider);
   const durationValue = batchActive ? `${elapsedMinutes(state.batch.startedAtMs, state.batch.finishedAtMs)} 分钟` : estimatedDuration(total);
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>只展示已选摘要，详细词条在编辑窗口中维护。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择生成速度</h3><p>普通批量优先使用快速模式；定稿前再用精细模式生成重点图片。</p></div></div><div class="generation-mode-grid" role="group" aria-label="生成速度">${Object.entries(GENERATION_PROFILES).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择模型服务</h3><p>OpenAI 与千问使用各自独立的临时密钥，可随时切换。</p></div></div><div class="generation-mode-grid provider-option-grid" role="group" aria-label="模型服务">${Object.entries(PROVIDERS).map(([provider, item]) => `<button class="generation-mode-option provider-option ${state.studio.provider === provider ? 'is-selected' : ''}" data-action="set-provider" data-provider="${provider}" aria-pressed="${state.studio.provider === provider}" ${batchRunning ? 'disabled' : ''}><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><span><strong>${item.name}</strong><small>${provider === 'openai' ? 'GPT Image 2 / 2.5 · 官方图像模型' : 'Qwen Image 3.0 / Pro · 阿里云百炼'}</small></span>${state.studio.provider === provider ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择生成速度</h3><p>普通批量优先使用快速模式；定稿前再用精细模式生成重点图片。</p></div></div><div class="generation-mode-grid" role="group" aria-label="生成速度">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
-    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${profile.name}` : `${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
+    <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
     <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>千问结果链接仅保留 24 小时，请生成后及时下载；保存会保留 SKU 与提示词记录。</p></div>` : ''}
+    <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>${activeProvider === 'qwen' ? '千问结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片会在当前标签页显示，请生成后及时下载；'}保存会保留 SKU 与提示词记录。</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -321,9 +347,14 @@ function renderExports() {
 }
 
 function renderConnections() {
-  const hasKey = Boolean(getQwenApiKey());
-  const status = state.connection.authenticated ? '密钥已验证 · 本标签页可用' : hasKey ? '已输入 · 等待验证' : '首次生成时输入密钥';
-  return `<section class="page">${pageHeading('模型连接', '无需配置 Cloudflare Access 或云端 Secret；首次使用时输入自己的千问密钥。')}<div class="connection-grid"><article class="connection-card connection-card--primary"><div class="connection-head"><span class="model-avatar model-avatar--qwen">Q</span><div><h3>千问图像 3.0</h3><p>${escapeHtml(status)}</p></div></div><div class="connection-trust">${svgIcon('check')}仅保存于当前浏览器标签页 · 关闭后自动清除</div><div class="capability-list"><span class="tag">默认快速模式</span><span class="tag">可选 Pro 精细模式</span><span class="tag">图生图</span><span class="tag">批量任务</span></div><button class="button ${hasKey ? 'button--secondary' : 'button--primary'}" data-action="authorize-qwen">${hasKey ? '更换或检查密钥' : '输入千问密钥'}</button>${hasKey ? '<button class="button button--quiet connection-clear" data-action="clear-qwen-key">清除本标签页密钥</button>' : ''}<p class="connection-note">图片按量计费；结果地址 24 小时有效，请及时下载。</p></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">临时</span><div><h3>密钥保存方式</h3><p>不写入项目与云端配置</p></div></div><div class="capability-list"><span class="tag">不进 GitHub</span><span class="tag">不存 Cloudflare Secret</span></div><p class="connection-copy">密钥只存在当前标签页的临时会话中，请求时经 HTTPS 交给无状态 Worker 转发到阿里千问。</p></article><article class="connection-card"><div class="connection-head"><span class="model-avatar">24h</span><div><h3>结果保存提醒</h3><p>阿里临时图片地址限制</p></div></div><div class="capability-list"><span class="tag">逐张下载</span><span class="tag">SKU 归档</span></div><p class="connection-copy">生成完成后请先下载原图。后续接入对象存储后可升级为长期云端归档。</p></article></div></section>`;
+  const providerCards = Object.entries(PROVIDERS).map(([provider, item]) => {
+    const hasKey = Boolean(getProviderApiKey(provider));
+    const authenticated = Boolean(state.connection.authenticated[provider]);
+    const status = authenticated ? '密钥已验证 · 本标签页可用' : hasKey ? '已输入 · 等待验证' : '首次使用时输入密钥';
+    const isActive = state.studio.provider === provider;
+    return `<article class="connection-card ${isActive ? 'connection-card--primary' : ''}"><div class="connection-head"><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><div><h3>${item.name}</h3><p>${escapeHtml(status)}</p></div></div><div class="connection-trust">${svgIcon('check')}仅保存于当前浏览器标签页 · 关闭后自动清除</div><div class="capability-list"><span class="tag">${item.profiles.fast.model}</span><span class="tag">${item.profiles.quality.model}</span><span class="tag">参考图生成</span></div><button class="button ${hasKey ? 'button--secondary' : 'button--primary'}" data-action="authorize-provider" data-provider="${provider}">${hasKey ? '更换或检查密钥' : `输入${item.shortName}密钥`}</button>${hasKey ? `<button class="button button--quiet connection-clear" data-action="clear-provider-key" data-provider="${provider}">清除本标签页密钥</button>` : ''}<button class="text-button connection-use" data-action="set-provider" data-provider="${provider}" ${isActive ? 'disabled' : ''}>${isActive ? '当前生成通道' : '设为生成通道'}</button><p class="connection-note">${provider === 'openai' ? '需要 OpenAI API 平台密钥；ChatGPT 网页会员不等于 API 授权。' : '图片按量计费；结果地址 24 小时有效，请及时下载。'}</p></article>`;
+  }).join('');
+  return `<section class="page">${pageHeading('模型连接', 'OpenAI 与千问都可直接连接；密钥仅在当前标签页临时使用。')}<div class="connection-grid connection-grid--models">${providerCards}<article class="connection-card"><div class="connection-head"><span class="model-avatar">临时</span><div><h3>密钥保存方式</h3><p>不写入项目与云端配置</p></div></div><div class="capability-list"><span class="tag">不进 GitHub</span><span class="tag">不存 Cloudflare Secret</span></div><p class="connection-copy">密钥只存在当前标签页的临时会话中，请求时经 HTTPS 交给无状态 Worker 转发到当前选择的模型服务。</p></article></div></section>`;
 }
 
 function renderProductDrawer() {
@@ -358,12 +389,14 @@ function renderConfirmDialog() {
   if (!state.ui.confirmBatch) return '';
   const total = plannedTotal();
   const profile = generationProfile();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认调用千问生成 ${total} 张素材？</h2><p>系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务；首次使用会先提示输入密钥。</p><div class="confirm-summary"><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${profile.model}</strong></div><div><span>产品</span><strong>${selectedProducts().map((product) => product.sku).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>阿里计费</span><strong>按实际成功图片数量结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div><p class="confirm-note">实际耗时受阿里实时队列影响；系统会按官方限频分批提交，避免请求过快导致失败。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch">${svgIcon('sparkles')}开始生成</button></div></section></div>`;
+  const provider = providerConfig();
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认调用 ${provider.shortName} 生成 ${total} 张素材？</h2><p>系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务；首次使用会先提示输入对应密钥。</p><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${profile.model}</strong></div><div><span>产品</span><strong>${selectedProducts().map((product) => product.sku).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div><p class="confirm-note">实际耗时受模型服务实时负载影响；系统会分批提交，降低请求过快导致失败的概率。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch">${svgIcon('sparkles')}开始生成</button></div></section></div>`;
 }
 
-function renderQwenKeyDialog() {
+function renderApiKeyDialog() {
   if (!keyDialogOpen) return '';
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入千问 API Key</h2><p id="key-dialog-help">支持 sk- 和 sk-ws- 格式，仅用于当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="qwen-api-key"><span>API Key</span><input id="qwen-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整的 sk- 或 sk-ws- 密钥" value="${escapeHtml(getQwenApiKey())}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-qwen-key">验证并使用</button></div></section></div>`;
+  const provider = providerConfig(keyDialogProvider);
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入${provider.keyLabel}</h2><p id="key-dialog-help">支持 sk- 开头的完整密钥，仅用于当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="provider-api-key"><span>API Key</span><input id="provider-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整的 sk- 开头密钥" value="${escapeHtml(getProviderApiKey(keyDialogProvider))}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div>${keyDialogProvider === 'openai' ? '<p class="key-help">请使用 OpenAI API 平台创建的密钥；ChatGPT 登录或会员本身不能作为 API Key。</p>' : ''}<div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-provider-key">验证并使用</button></div></section></div>`;
 }
 
 function renderImagePreview() {
@@ -373,7 +406,7 @@ function renderImagePreview() {
 
 function renderOverlays() {
   const root = $('#overlay-root');
-  root.innerHTML = renderImagePreview() || renderQwenKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
+  root.innerHTML = renderImagePreview() || renderApiKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
   document.body.classList.toggle('overlay-open', Boolean(root.innerHTML) || !$('#import-modal').hidden);
   hydrateIcons(root);
 }
@@ -466,13 +499,22 @@ function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolv
 async function apiJson(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (path.startsWith('/api/qwen/')) {
-    const apiKey = getQwenApiKey();
+    const apiKey = getProviderApiKey('qwen');
     if (!apiKey) {
       const error = new Error('请先输入千问 API Key。');
       error.code = 'KEY_REQUIRED';
       throw error;
     }
     headers.set('X-Qwen-Api-Key', apiKey);
+  }
+  if (path.startsWith('/api/openai/')) {
+    const apiKey = getProviderApiKey('openai');
+    if (!apiKey) {
+      const error = new Error('请先输入 OpenAI API Key。');
+      error.code = 'KEY_REQUIRED';
+      throw error;
+    }
+    headers.set('X-OpenAI-Api-Key', apiKey);
   }
   let response;
   try {
@@ -497,29 +539,30 @@ async function apiJson(path, options = {}) {
   return data;
 }
 
-async function checkQwenAuthorization(showFailure = true) {
-  if (!getQwenApiKey()) return false;
+async function checkProviderAuthorization(provider = state.studio.provider, showFailure = true) {
+  if (!getProviderApiKey(provider)) return false;
   try {
-    const session = await apiJson('/api/qwen/validate', { method: 'POST' });
-    state.connection.authenticated = Boolean(session.valid);
+    const session = await apiJson(`/api/${provider}/validate`, { method: 'POST' });
+    state.connection.authenticated[provider] = Boolean(session.valid);
     saveState(); render();
-    return state.connection.authenticated;
+    return state.connection.authenticated[provider];
   } catch (error) {
-    state.connection.authenticated = false;
-    if (error.code === 'KEY_REQUIRED' || error.code === 'KEY_INVALID') clearQwenApiKey();
+    state.connection.authenticated[provider] = false;
+    if (error.code === 'KEY_REQUIRED' || error.code === 'KEY_INVALID') clearProviderApiKey(provider);
     saveState(); render();
     if (showFailure) showToast('密钥验证失败', error.message, 'info');
     return false;
   }
 }
 
-function openQwenKeyDialog(action = '') {
+function openApiKeyDialog(provider = state.studio.provider, action = '') {
   rememberFocus();
+  keyDialogProvider = provider;
   pendingKeyAction = action;
   keyDialogError = '';
   keyDialogOpen = true;
   render();
-  requestAnimationFrame(() => $('#qwen-api-key')?.focus());
+  requestAnimationFrame(() => $('#provider-api-key')?.focus());
 }
 
 function generationPrompt(product, tags) {
@@ -543,7 +586,7 @@ function blobToDataUrl(blob) {
   });
 }
 
-async function referenceImageForQwen(product) {
+async function referenceImageForModel(product) {
   if (product.image.startsWith('data:image/')) return product.image;
   if (referenceImageCache.has(product.image)) return referenceImageCache.get(product.image);
 
@@ -574,7 +617,7 @@ async function referenceImageForQwen(product) {
 async function submitQwenResult(result) {
   const product = productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
-  const referenceImage = await referenceImageForQwen(product);
+  const referenceImage = await referenceImageForModel(product);
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -587,8 +630,24 @@ async function submitQwenResult(result) {
   result.error = '';
 }
 
+async function submitOpenAiResult(result) {
+  const product = productById(result.productId);
+  if (!product) throw new Error('找不到对应产品。');
+  const referenceImage = await referenceImageForModel(product);
+  const output = await apiJson('/api/openai/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: generationPrompt(product, result.tags), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+  });
+  result.image = output.imageUrl;
+  result.status = 'ready';
+  result.submittedAt = Date.now();
+  result.remoteStatus = 'SUCCEEDED';
+  result.error = '';
+}
+
 async function submitQwenBatch(results, batchId) {
-  const profile = generationProfile(state.batch.generationMode);
+  const profile = generationProfile(state.batch.generationMode, 'qwen');
   for (let offset = 0; offset < results.length && activeGenerationId === batchId; offset += profile.submitLimit) {
     if (offset > 0) {
       state.batch.nextSubmissionAt = Date.now() + 60000;
@@ -597,8 +656,23 @@ async function submitQwenBatch(results, batchId) {
     }
     state.batch.nextSubmissionAt = 0;
     const windowItems = results.slice(offset, offset + profile.submitLimit);
-    await runWithConcurrency(windowItems, Math.min(5, windowItems.length), submitQwenResult);
+    await runWithConcurrency(windowItems, Math.min(profile.concurrency, windowItems.length), submitQwenResult);
   }
+}
+
+async function submitOpenAiBatch(results, batchId) {
+  const profile = generationProfile(state.batch.generationMode, 'openai');
+  for (let offset = 0; offset < results.length && activeGenerationId === batchId; offset += profile.submitLimit) {
+    if (offset > 0) {
+      state.batch.nextSubmissionAt = Date.now() + 60000;
+      saveState(); render();
+      await sleep(60000);
+    }
+    state.batch.nextSubmissionAt = 0;
+    const windowItems = results.slice(offset, offset + profile.submitLimit);
+    await runWithConcurrency(windowItems, Math.min(profile.concurrency, windowItems.length), submitOpenAiResult);
+  }
+  finishBatch(batchId);
 }
 
 async function runWithConcurrency(items, concurrency, operation) {
@@ -649,13 +723,18 @@ async function pollQwenBatch(batchId) {
     if (activeGenerationId !== batchId) break;
     if (state.batch.results.some((item) => item.status === 'loading')) await sleep(QWEN_POLL_INTERVAL);
   }
+  finishBatch(batchId);
+}
+
+function finishBatch(batchId) {
   if (state.batch.id !== batchId) return;
   activeGenerationId = '';
   state.batch.finishedAtMs = Date.now();
   state.batch.status = batchDelayedCount() ? 'delayed' : batchReadyCount() ? 'ready' : 'failed';
   saveState(); render();
+  const provider = providerConfig(state.batch.provider || 'qwen');
   if (batchDelayedCount()) showToast('千问任务等待时间较长', `${batchDelayedCount()} 张保留了原任务，可点击“查询结果”，不会重复扣分。`, 'info');
-  else if (batchReadyCount()) showToast('批量生成完成', `${batchReadyCount()} 张素材已生成${batchFailedCount() ? `，${batchFailedCount()} 张可重试` : ''}。请在 24 小时内下载。`, 'sparkles');
+  else if (batchReadyCount()) showToast('批量生成完成', `${provider.shortName} 已生成 ${batchReadyCount()} 张素材${batchFailedCount() ? `，${batchFailedCount()} 张可重试` : ''}。请及时下载。`, 'sparkles');
   else showToast('本批次未生成图片', '请查看失败原因并逐张重试。', 'info');
 }
 
@@ -664,36 +743,47 @@ async function startBatchGeneration() {
   if (!total || total > MAX_BATCH_SIZE) return;
   const cost = batchCost();
   if (state.credits < cost) { closeOverlay(); showToast('积分不足', `本次需要 ${cost} 积分，请减少组合数量。`, 'database'); return; }
-  if (!getQwenApiKey()) { openQwenKeyDialog('generate'); return; }
-  const authorized = await checkQwenAuthorization(false);
-  if (!authorized) { openQwenKeyDialog('generate'); keyDialogError = '密钥无效或已失效，请重新输入。'; render(); return; }
+  const provider = state.studio.provider;
+  if (!getProviderApiKey(provider)) { openApiKeyDialog(provider, 'generate'); return; }
+  const authorized = await checkProviderAuthorization(provider, false);
+  if (!authorized) { openApiKeyDialog(provider, 'generate'); keyDialogError = '密钥无效、无模型权限或 API 额度不可用，请检查后重新输入。'; render(); return; }
   clearInterval(generationTimer);
   const combinations = buildCombinations();
-  const generationMode = GENERATION_PROFILES[state.studio.generationMode] ? state.studio.generationMode : 'fast';
-  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, generationMode, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
+  const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
+  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, provider, generationMode, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
   state.credits -= cost;
-  state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
+  state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   saveState(); render();
-  await submitQwenBatch(results, state.batch.id);
-  if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
+  if (provider === 'openai') await submitOpenAiBatch(results, state.batch.id);
+  else {
+    await submitQwenBatch(results, state.batch.id);
+    if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
+  }
 }
 
 async function regenerateResult(id) {
   const item = state.batch.results.find((result) => result.id === id);
   if (!item || item.status === 'loading' || item.status === 'queued') return;
   if (state.credits < CREDIT_PER_IMAGE) { showToast('积分不足', '无法重新生成当前素材。', 'database'); return; }
-  if (!getQwenApiKey()) { openQwenKeyDialog(`regenerate:${id}`); return; }
-  const authorized = await checkQwenAuthorization(false);
-  if (!authorized) { openQwenKeyDialog(`regenerate:${id}`); keyDialogError = '密钥无效或已失效，请重新输入。'; render(); return; }
+  const provider = state.studio.provider;
+  if (!getProviderApiKey(provider)) { openApiKeyDialog(provider, `regenerate:${id}`); return; }
+  const authorized = await checkProviderAuthorization(provider, false);
+  if (!authorized) { openApiKeyDialog(provider, `regenerate:${id}`); keyDialogError = '密钥无效、无模型权限或 API 额度不可用，请检查后重新输入。'; render(); return; }
   state.credits -= CREDIT_PER_IMAGE;
-  item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false;
+  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false;
+  state.batch.provider = provider;
   activeGenerationId = state.batch.id;
   saveState(); render();
   try {
-    await submitQwenResult(item);
-    await pollQwenBatch(state.batch.id);
+    if (provider === 'openai') {
+      await submitOpenAiResult(item);
+      finishBatch(state.batch.id);
+    } else {
+      await submitQwenResult(item);
+      await pollQwenBatch(state.batch.id);
+    }
     if (item.status === 'ready') showToast('单张素材已更新', '其他结果保持不变，请及时下载。', 'refresh');
   } catch (error) {
     activeGenerationId = '';
@@ -705,9 +795,9 @@ async function regenerateResult(id) {
 async function checkExistingResult(id) {
   const item = state.batch.results.find((result) => result.id === id);
   if (!item?.taskId || item.status === 'loading' || item.status === 'queued') return;
-  if (!getQwenApiKey()) { openQwenKeyDialog(`check-result:${id}`); return; }
-  const authorized = await checkQwenAuthorization(false);
-  if (!authorized) { openQwenKeyDialog(`check-result:${id}`); keyDialogError = '密钥无效或已失效，请重新输入。'; render(); return; }
+  if (!getProviderApiKey('qwen')) { openApiKeyDialog('qwen', `check-result:${id}`); return; }
+  const authorized = await checkProviderAuthorization('qwen', false);
+  if (!authorized) { openApiKeyDialog('qwen', `check-result:${id}`); keyDialogError = '请输入原任务使用的有效千问密钥。'; render(); return; }
   item.status = 'loading';
   item.submittedAt = Date.now();
   state.batch.status = 'generating';
@@ -729,9 +819,16 @@ async function resumePendingBatch() {
     saveState(); render();
     return;
   }
-  if (!getQwenApiKey()) { openQwenKeyDialog('resume'); return; }
-  const authorized = await checkQwenAuthorization(false);
-  if (!authorized) { openQwenKeyDialog('resume'); keyDialogError = '请输入原任务使用的有效密钥以继续查询，不会创建新任务。'; render(); return; }
+  if ((state.batch.provider || 'qwen') !== 'qwen') {
+    pending.forEach((item) => { item.status = 'failed'; item.error = 'OpenAI 同步请求已因页面关闭而中断，请重新生成此图片。'; });
+    state.batch.finishedAtMs ||= Date.now();
+    state.batch.status = batchReadyCount() ? 'ready' : 'failed';
+    saveState(); render();
+    return;
+  }
+  if (!getProviderApiKey('qwen')) { openApiKeyDialog('qwen', 'resume'); return; }
+  const authorized = await checkProviderAuthorization('qwen', false);
+  if (!authorized) { openApiKeyDialog('qwen', 'resume'); keyDialogError = '请输入原任务使用的有效密钥以继续查询，不会创建新任务。'; render(); return; }
   activeGenerationId = state.batch.id;
   pending.forEach((item) => { item.submittedAt ||= Date.now(); });
   await pollQwenBatch(state.batch.id);
@@ -818,11 +915,20 @@ document.addEventListener('click', async (event) => {
     if (group && label) { group.options.push({ id: uid('option'), label, selected: true, quantity: 1 }); saveState(); render(); focusOverlay(); } else input?.focus();
   }
   if (action === 'finish-prompt-editor') closeOverlay();
+  if (action === 'set-provider') {
+    const provider = button.dataset.provider;
+    if (PROVIDERS[provider] && state.batch.status !== 'generating') {
+      state.studio.provider = provider;
+      state.studio.model = generationProfile(state.studio.generationMode, provider).code;
+      saveState(); render();
+      showToast('生成通道已切换', `接下来将使用 ${providerConfig(provider).name}。`, 'check');
+    }
+  }
   if (action === 'set-generation-mode') {
     const mode = button.dataset.mode;
-    if (GENERATION_PROFILES[mode] && state.batch.status !== 'generating') {
+    if (providerConfig().profiles[mode] && state.batch.status !== 'generating') {
       state.studio.generationMode = mode;
-      state.studio.model = GENERATION_PROFILES[mode].code;
+      state.studio.model = providerConfig().profiles[mode].code;
       saveState(); render();
     }
   }
@@ -838,39 +944,42 @@ document.addEventListener('click', async (event) => {
   if (action === 'use-template') { state.studio.templateId = button.dataset.id; setRoute('studio'); showToast('模板已加载', '提示词结构和输出规格已准备好。', 'grid'); }
   if (action === 'download-asset') downloadImage(button.dataset.image, button.dataset.name);
   if (action === 'download-result') { const result = state.batch.results.find((item) => item.id === button.dataset.id); const product = result ? productById(result.productId) : null; if (result?.image) downloadImage(result.image, `${product?.sku || 'Qwen'}-${state.batch.id}`); }
-  if (action === 'authorize-qwen') {
-    openQwenKeyDialog('check');
+  if (action === 'authorize-provider') {
+    openApiKeyDialog(button.dataset.provider, 'check');
   }
-  if (action === 'clear-qwen-key') {
-    clearQwenApiKey();
+  if (action === 'clear-provider-key') {
+    const provider = button.dataset.provider;
+    clearProviderApiKey(provider);
     saveState(); render();
-    showToast('本标签页密钥已清除', '下次生成时会重新弹出输入窗口。', 'check');
+    showToast(`${providerConfig(provider).shortName}密钥已清除`, '下次使用该模型时会重新弹出输入窗口。', 'check');
   }
-  if (action === 'save-qwen-key') {
-    const input = $('#qwen-api-key');
-    const apiKey = normalizeQwenApiKey(input?.value);
-    if (!isQwenApiKey(apiKey)) {
-      keyDialogError = '请输入完整的千问 API Key，支持 sk- 和 sk-ws- 开头的密钥。';
-      render(); requestAnimationFrame(() => $('#qwen-api-key')?.focus()); return;
+  if (action === 'save-provider-key') {
+    const provider = keyDialogProvider;
+    const input = $('#provider-api-key');
+    const apiKey = normalizeApiKey(input?.value);
+    if (!isProviderApiKey(apiKey)) {
+      keyDialogError = `请输入完整的${providerConfig(provider).keyLabel}，应以 sk- 开头。`;
+      render(); requestAnimationFrame(() => $('#provider-api-key')?.focus()); return;
     }
-    if (!setQwenApiKey(apiKey)) {
+    if (!setProviderApiKey(provider, apiKey)) {
       keyDialogError = '浏览器禁止了标签页临时存储，请关闭隐私限制后重试。';
       render(); return;
     }
     button.disabled = true;
     button.textContent = '正在验证…';
     const nextAction = pendingKeyAction;
-    if (!(await checkQwenAuthorization(false))) {
+    if (!(await checkProviderAuthorization(provider, false))) {
       keyDialogOpen = true;
       pendingKeyAction = nextAction;
-      keyDialogError = '密钥验证失败，请检查密钥是否完整且仍然有效。';
-      render(); requestAnimationFrame(() => $('#qwen-api-key')?.focus()); return;
+      keyDialogProvider = provider;
+      keyDialogError = '密钥验证失败，请确认密钥来自正确的 API 平台、仍然有效并具有模型权限。';
+      render(); requestAnimationFrame(() => $('#provider-api-key')?.focus()); return;
     }
     keyDialogOpen = false;
     keyDialogError = '';
     pendingKeyAction = '';
     render();
-    showToast('千问连接正常', `密钥已验证，当前模型为 ${state.connection.model}。`, 'check');
+    showToast(`${providerConfig(provider).shortName}连接正常`, `密钥已验证，可使用 ${providerConfig(provider).profiles.fast.model}。`, 'check');
     if (nextAction === 'generate') await startBatchGeneration();
     if (nextAction.startsWith('regenerate:')) await regenerateResult(nextAction.slice('regenerate:'.length));
     if (nextAction.startsWith('check-result:')) await checkExistingResult(nextAction.slice('check-result:'.length));
@@ -927,7 +1036,7 @@ $('#mobile-menu').addEventListener('click', () => {
 
 (async function init() {
   hydrateIcons(); loadLocalState();
-  if (!getQwenApiKey()) state.connection.authenticated = false;
+  Object.keys(PROVIDERS).forEach((provider) => { if (!getProviderApiKey(provider)) state.connection.authenticated[provider] = false; });
   const initialRoute = location.hash.slice(1);
   setRoute(routeMeta[initialRoute] ? initialRoute : (state.ui.route || 'products'), false, false);
   await loadState();

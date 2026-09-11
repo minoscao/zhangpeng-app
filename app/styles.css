@@ -224,10 +224,13 @@ textarea { min-height: 120px; padding: 11px; resize: vertical; font-size: 12px; 
 .capability-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 18px; }
 .connection-card--primary { grid-column: span 1; border-color: #cfc9ed; }
 .model-avatar--qwen { background: #5b4dc4; }
+.model-avatar--openai { background: linear-gradient(145deg, #111827, #10a37f); }
 .connection-trust { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 9px 10px; color: var(--green); background: var(--green-bg); border-radius: 10px; font-size: 10px; font-weight: 800; }
 .connection-trust svg { width: 16px; flex: 0 0 auto; }
 .connection-card > .button { width: 100%; }
 .connection-card > .connection-clear { margin-top: 8px; }
+.connection-use { width: 100%; margin-top: 10px; text-align: center; }
+.connection-use:disabled { color: var(--green); cursor: default; opacity: 1; }
 .connection-note, .connection-copy { margin: 11px 0 0; color: var(--ink-500); font-size: 9px; line-height: 1.55; }
 .export-card svg { width: 25px; color: var(--purple-600); }
 .export-card h3 { margin: 18px 0 5px; }
@@ -391,6 +394,8 @@ body.overlay-open { overflow: hidden; }
 .generation-mode-option strong, .generation-mode-option small { display: block; }
 .generation-mode-option strong { font-size: 11px; }
 .generation-mode-option small { margin-top: 3px; color: var(--ink-600); font-size: 8px; line-height: 1.45; }
+.provider-option { min-height: 84px; }
+.provider-option .model-avatar { border-radius: 11px; }
 .mode-check { display: grid; width: 22px; height: 22px; place-items: center; color: white; background: var(--purple-700); border-radius: 7px; }
 .mode-check svg { width: 13px; }
 .confirm-note { margin: 12px 0 0; color: var(--ink-600); font-size: 9px; line-height: 1.5; text-align: center; }
@@ -576,6 +581,7 @@ body.overlay-open { overflow: hidden; }
 .key-field .input-control { min-height: 48px; padding-inline: 13px; letter-spacing: .04em; }
 .key-privacy { display: flex; align-items: center; gap: 7px; margin-top: 12px; padding: 10px 11px; color: var(--green); background: var(--green-bg); border-radius: 10px; font-size: 10px; font-weight: 700; }
 .key-privacy svg { width: 16px; flex: 0 0 auto; }
+.key-help { margin: 9px 0 0; color: var(--ink-500); font-size: 9px; line-height: 1.55; }
 .field-error { margin: 8px 0 0; color: var(--red); font-size: 10px; line-height: 1.5; }
 .empty-inline { grid-column: 1 / -1; padding: 24px; color: var(--ink-500); background: var(--surface-soft); border-radius: 10px; font-size: 10px; text-align: center; }
 .metric-list { display: grid; gap: 0; }
