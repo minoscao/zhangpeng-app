@@ -550,13 +550,15 @@ body.overlay-open { overflow: hidden; }
 .custom-group-form label, .new-option-form label { display: block; margin-bottom: 6px; color: var(--ink-600); font-size: 9px; font-weight: 700; }
 .custom-group-form > div, .new-option-form > div { display: flex; gap: 8px; }
 .option-editor-list { display: grid; gap: 8px; }
-.option-editor { display: grid; grid-template-columns: 1fr auto; align-items: center; min-height: 56px; padding: 7px 9px; background: white; border: 1px solid var(--line); border-radius: 10px; }
+.option-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 64px; padding: 7px 9px; background: white; border: 1px solid var(--line); border-radius: 10px; }
 .option-editor.is-selected { background: var(--purple-50); border-color: #c5bff0; }
 .option-toggle { display: flex; min-height: 42px; align-items: center; gap: 9px; color: var(--ink-800); background: transparent; border: 0; text-align: left; }
-.option-toggle > span { display: grid; width: 23px; height: 23px; place-items: center; color: white; background: white; border: 1px solid var(--line-strong); border-radius: 6px; }
-.option-toggle[aria-pressed="true"] > span { background: var(--purple-700); border-color: var(--purple-700); }
+.option-toggle > .option-check { display: grid; width: 23px; height: 23px; flex: 0 0 auto; place-items: center; color: white; background: white; border: 1px solid var(--line-strong); border-radius: 6px; }
+.option-toggle[aria-pressed="true"] > .option-check { background: var(--purple-700); border-color: var(--purple-700); }
 .option-toggle svg { width: 14px; }
-.option-toggle strong { font-size: 10px; }
+.option-copy { display: grid; min-width: 0; gap: 3px; }
+.option-copy strong { font-size: 10px; }
+.option-copy small { color: var(--ink-500); font-size: 8px; line-height: 1.45; }
 .quantity-control { display: flex; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .quantity-control button { width: 34px; height: 34px; color: var(--purple-700); background: white; border: 0; font-size: 15px; }
 .quantity-control span { min-width: 38px; color: var(--ink-800); font-size: 9px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; }

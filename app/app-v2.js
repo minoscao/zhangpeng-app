@@ -41,6 +41,33 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
+const CURRENT_SCHEMA_VERSION = 7;
+const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
+const DEFAULT_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确。成片必须呈现精修过的真实商业摄影质感：自然可信、大气克制、光线高级、材质纹理清晰，童趣但不幼稚。主体完整，不添加文字、商标与水印。';
+const CORE_PROMPT_GROUPS = Object.freeze({
+  'group-location': Object.freeze({
+    id: 'group-location', name: '当地背景', enabled: true,
+    options: Object.freeze([
+      Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '海港地标、海滨公园与明亮自然光', prompt: '采用澳大利亚悉尼的高端户外生活背景，从悉尼歌剧院轮廓、海港大桥、海滨公园或当地明亮现代住宅中选择一至两项自然融入远景；保持真实空间关系和当地清透日光，地标只作为可识别的环境线索，不遮挡或抢过帐篷主体，避免旅游明信片感和生硬拼贴', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'dubai', label: '阿联酋·迪拜', description: '现代天际线、沙漠庭院与棕榈绿洲', prompt: '采用阿联酋迪拜的高端家庭户外背景，从现代天际线、沙漠庭院、浅色石材建筑或棕榈绿洲中选择一至两项自然融入环境；使用当地温暖阳光和克制奢华的空间语言，背景真实大气但不抢帐篷主体，避免夸张地标堆砌', selected: true, quantity: 2 }),
+      Object.freeze({ id: 'suzhou', label: '中国·苏州', description: '现代江南庭院、白墙黛瓦与水岸绿意', prompt: '采用中国苏州的现代江南家庭背景，从白墙黛瓦、当代庭院、水岸绿意或园林窗景中选择一至两项自然融入远景；光线柔和通透，传统线索克制现代，保持真实住宅尺度，不做古装影楼或旅游景点式布景', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'california', label: '美国·加利福尼亚', description: '开阔后院、阳光木屋与松弛家庭生活', prompt: '采用美国加利福尼亚的高端家庭户外背景，呈现开阔草坪后院、浅色木屋、棕榈或耐旱景观中的一至两项；使用充足自然日光和松弛真实的家庭生活氛围，空间开阔，帐篷仍是唯一视觉主体', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'london', label: '英国·伦敦', description: '英式花园、联排住宅与柔和天光', prompt: '采用英国伦敦家庭生活背景，将英式后花园、浅砖联排住宅、修剪绿篱或柔和阴天天光自然融入环境；画面优雅克制、真实宜居，地域特征清楚但不过度装饰，不遮挡帐篷产品', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'paris', label: '法国·巴黎', description: '法式花园、浅石立面与优雅生活感', prompt: '采用法国巴黎或近郊的高端家庭背景，将浅色石材立面、法式花园、铁艺窗或克制优雅的城市露台自然融入远景；保持真实摄影和当代生活感，避免埃菲尔铁塔式直白贴图，帐篷始终为核心主体', selected: false, quantity: 1 }),
+    ]),
+  }),
+  'group-color': Object.freeze({
+    id: 'group-color', name: '产品配色', enabled: true,
+    options: Object.freeze([
+      Object.freeze({ id: 'red', label: '暖陶红帐篷', description: '只改变帐篷面料主色，背景保持自然', prompt: '将帐篷主体面料主色调整为高级、低饱和的暖陶红；只改变产品织物颜色，保持支架、连接件、地面和环境本来的真实颜色，不给整张图片添加红色色调', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'blue', label: '冰川蓝帐篷', description: '清透低饱和蓝，保留真实材质层次', prompt: '将帐篷主体面料主色调整为清透、低饱和的冰川蓝；只改变产品织物颜色，保留面料纹理、缝线、支架和背景的自然色彩，不把整幅画面染成蓝色', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'cream', label: '奶油白帐篷', description: '温润象牙白，避免过曝和廉价塑料感', prompt: '将帐篷主体面料主色调整为温润的奶油白或浅象牙白；只改变产品织物颜色，保留织物纤维和明暗层次，避免纯白过曝、塑料感或背景整体泛白', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'sage', label: '鼠尾草绿帐篷', description: '自然低饱和绿，适配室内外场景', prompt: '将帐篷主体面料主色调整为自然、低饱和的鼠尾草绿；仅调整产品织物，不改变木杆、金属件、人物肤色和环境色彩，保持高级户外家居质感', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'blush', label: '柔雾粉帐篷', description: '柔和高级粉，童趣但不甜腻', prompt: '将帐篷主体面料主色调整为低饱和柔雾粉；仅改变产品织物颜色，保持环境中性自然，避免整图粉色滤镜、荧光粉或廉价甜腻感', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'lavender', label: '星云紫帐篷', description: '梦幻灰紫，保留真实摄影与织物质感', prompt: '将帐篷主体面料主色调整为克制梦幻的灰调星云紫；仅改变产品织物颜色，保留真实面料纹理与自然环境色，避免全画面紫色调和虚假发光效果', selected: false, quantity: 1 }),
+    ]),
+  }),
+});
 const PROVIDERS = Object.freeze({
   openai: Object.freeze({
     name: 'ChatGPT / OpenAI', shortName: 'OpenAI', keyStorage: OPENAI_KEY_STORAGE, keyLabel: 'OpenAI API Key', avatar: 'AI',
@@ -88,7 +115,7 @@ const seedSavedAssets = [
 ];
 
 const seedState = {
-  schemaVersion: 6,
+  schemaVersion: CURRENT_SCHEMA_VERSION,
   credits: 2680,
   products: productDefinitions.map(seedProduct),
   savedAssets: seedSavedAssets,
@@ -102,15 +129,15 @@ const seedState = {
     { id: 'pr-2', name: '儿童帐篷多配色方案', type: '提示词组合', image: RESULT_IMAGES[1], updated: '昨天' },
   ],
   promptGroups: [
-    { id: 'group-location', name: '地理位置', enabled: true, options: [{ id: 'sydney', label: '澳大利亚·悉尼', selected: true, quantity: 1 }, { id: 'dubai', label: '阿联酋·迪拜', selected: true, quantity: 2 }, { id: 'suzhou', label: '中国·苏州', selected: false, quantity: 1 }] },
-    { id: 'group-color', name: '颜色组', enabled: true, options: [{ id: 'red', label: '暖陶红', selected: true, quantity: 1 }, { id: 'blue', label: '冰川蓝', selected: true, quantity: 1 }, { id: 'cream', label: '奶油白', selected: false, quantity: 1 }] },
+    structuredClone(CORE_PROMPT_GROUPS['group-location']),
+    structuredClone(CORE_PROMPT_GROUPS['group-color']),
   ],
   promptLibrary: [
     { id: 'group-scene', name: '使用场景', options: ['儿童房', '阅读角', '后院草地', '露营营地'] },
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
     { id: 'group-style', name: '视觉风格', options: ['北欧自然', '轻奢柔光', '明亮电商', '户外纪实'] },
   ],
-  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。', provider: 'openai', generationMode: 'fast', model: 'gpt-image-2', ratio: '4:3' },
+  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
   ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
@@ -128,10 +155,33 @@ let pendingKeyAction = '';
 let keyDialogProvider = 'openai';
 let imagePreview = null;
 
+function upgradeCorePromptGroups(groups) {
+  if (!Array.isArray(groups)) return structuredClone(seedState.promptGroups);
+  return groups.map((group) => {
+    const template = CORE_PROMPT_GROUPS[group.id];
+    if (!template) return group;
+    const existingOptions = Array.isArray(group.options) ? group.options : [];
+    const templateIds = new Set(template.options.map((option) => option.id));
+    const upgradedOptions = template.options.map((option) => {
+      const existing = existingOptions.find((item) => item.id === option.id);
+      return { ...structuredClone(option), selected: existing?.selected ?? option.selected, quantity: Math.max(1, Number(existing?.quantity) || option.quantity) };
+    });
+    const customOptions = existingOptions.filter((option) => !templateIds.has(option.id)).map((option) => ({ ...option, prompt: option.prompt || option.label, description: option.description || '自定义选项' }));
+    return { ...structuredClone(template), enabled: group.enabled !== false, options: [...upgradedOptions, ...customOptions] };
+  });
+}
+
 function applySavedState(saved) {
-  if (saved?.schemaVersion !== 6 || !Array.isArray(saved.products)) return;
+  if (![6, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
-  if (!saved.studio?.generationMode) state.studio.generationMode = 'fast';
+  if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
+    state.schemaVersion = CURRENT_SCHEMA_VERSION;
+    state.promptGroups = upgradeCorePromptGroups(state.promptGroups);
+    if (!saved.studio?.universalPrompt || saved.studio.universalPrompt === LEGACY_UNIVERSAL_PROMPT) state.studio.universalPrompt = DEFAULT_UNIVERSAL_PROMPT;
+    state.studio.generationMode = 'quality';
+    state.studio.model = providerConfig(state.studio.provider).profiles.quality.code;
+  }
+  if (!saved.studio?.generationMode) state.studio.generationMode = 'quality';
   if (!saved.studio?.provider || !PROVIDERS[state.studio.provider]) state.studio.provider = 'openai';
   if (!saved.batch?.generationMode && saved.batch?.results?.length) state.batch.generationMode = 'quality';
   if (saved.batch?.results?.length && !PROVIDERS[state.batch.provider]) state.batch.provider = 'qwen';
@@ -279,7 +329,7 @@ function renderSelectedProducts() {
 }
 
 function renderPromptGroups() {
-  if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。添加地点、颜色或场景后，系统会自动计算组合数量。</div>';
+  if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。添加当地背景、产品配色或使用场景后，系统会自动计算组合数量。</div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
     const options = selectedOptions(group);
     return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip">${escapeHtml(option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions"><button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button><button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button><button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button></div></article>`;
@@ -316,9 +366,9 @@ function renderStudio() {
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>只展示已选摘要，详细词条在编辑窗口中维护。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择模型服务</h3><p>OpenAI 与千问使用各自独立的临时密钥，可随时切换。</p></div></div><div class="generation-mode-grid provider-option-grid" role="group" aria-label="模型服务">${Object.entries(PROVIDERS).map(([provider, item]) => `<button class="generation-mode-option provider-option ${state.studio.provider === provider ? 'is-selected' : ''}" data-action="set-provider" data-provider="${provider}" aria-pressed="${state.studio.provider === provider}" ${batchRunning ? 'disabled' : ''}><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><span><strong>${item.name}</strong><small>${provider === 'openai' ? 'GPT Image 2 / 2.5 · 官方图像模型' : 'Qwen Image 3.0 / Pro · 阿里云百炼'}</small></span>${state.studio.provider === provider ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择生成速度</h3><p>普通批量优先使用快速模式；定稿前再用精细模式生成重点图片。</p></div></div><div class="generation-mode-grid" role="group" aria-label="生成速度">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择成片质量</h3><p>默认使用精细成片；快速草图仅用于先确认构图与方向。</p></div></div><div class="generation-mode-grid" role="group" aria-label="成片质量">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
@@ -382,7 +432,7 @@ function renderPromptDialog() {
   }
   const group = state.promptGroups.find((item) => item.id === dialogId);
   if (!group) return '';
-  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>勾选词条并设置数量；数量会参与最终组合计算。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span>${option.selected ? svgIcon('check') : ''}</span><strong>${escapeHtml(option.label)}</strong></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
 function renderConfirmDialog() {
@@ -486,10 +536,13 @@ function closeImport() {
 }
 
 function buildCombinations() {
-  let combinations = [{ tags: [] }];
+  let combinations = [{ tags: [], promptDetails: [] }];
   enabledGroups().forEach((group) => {
-    const expanded = selectedOptions(group).flatMap((option) => Array.from({ length: option.quantity }, () => option.label));
-    combinations = combinations.flatMap((combo) => expanded.map((label) => ({ tags: [...combo.tags, `${group.name}：${label}`] })));
+    const expanded = selectedOptions(group).flatMap((option) => Array.from({ length: option.quantity }, () => ({ label: option.label, prompt: option.prompt || option.label })));
+    combinations = combinations.flatMap((combo) => expanded.map((option) => ({
+      tags: [...combo.tags, `${group.name}：${option.label}`],
+      promptDetails: [...combo.promptDetails, `${group.name}：${option.prompt}`],
+    })));
   });
   return combinations;
 }
@@ -565,15 +618,17 @@ function openApiKeyDialog(provider = state.studio.provider, action = '') {
   requestAnimationFrame(() => $('#provider-api-key')?.focus());
 }
 
-function generationPrompt(product, tags) {
-  const combination = tags.map((tag) => tag.replace('：', '为')).join('；');
+function generationPrompt(product, tags, promptDetails = []) {
+  const combination = (promptDetails.length ? promptDetails : tags).map((tag) => tag.replace('：', '要求为')).join('；');
   return [
-    '请基于输入参考图生成一张高端、写实的儿童帐篷商业产品摄影。',
+    '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
     `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
     '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
-    combination ? `本张创作组合：${combination}。` : '',
+    combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料。` : '',
     state.studio.universalPrompt,
-    '画面须自然可信、空间尺度合理、材质纹理清晰，适合国际儿童用品电商与品牌手册。',
+    '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
+    '产品质感：清楚表现织物纤维、包边、缝线、褶皱张力和支架材质；边缘干净、接触阴影可信，避免塑料感、蜡感、过度磨皮、结构变形和悬浮感。',
+    '整体适合国际儿童用品品牌、电商主视觉与高端产品手册；如出现儿童或家庭人物，动作自然、比例正确且不得遮挡帐篷关键结构。',
   ].filter(Boolean).join('\n');
 }
 
@@ -621,7 +676,7 @@ async function submitQwenResult(result) {
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: generationPrompt(product, result.tags), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ prompt: generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.taskId = task.taskId;
   result.status = 'loading';
@@ -637,7 +692,7 @@ async function submitOpenAiResult(result) {
   const output = await apiJson('/api/openai/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: generationPrompt(product, result.tags), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ prompt: generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.image = output.imageUrl;
   result.status = 'ready';
@@ -750,7 +805,7 @@ async function startBatchGeneration() {
   clearInterval(generationTimer);
   const combinations = buildCombinations();
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
-  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, provider, generationMode, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
+  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, promptDetails: combo.promptDetails, provider, generationMode, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
   state.credits -= cost;
   state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
   activeGenerationId = state.batch.id;
@@ -912,7 +967,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'add-prompt-option') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const input = $('#new-option-label'); const label = input?.value.trim();
-    if (group && label) { group.options.push({ id: uid('option'), label, selected: true, quantity: 1 }); saveState(); render(); focusOverlay(); } else input?.focus();
+    if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); saveState(); render(); focusOverlay(); } else input?.focus();
   }
   if (action === 'finish-prompt-editor') closeOverlay();
   if (action === 'set-provider') {

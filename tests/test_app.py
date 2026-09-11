@@ -135,6 +135,17 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIn("closeImagePreview", client)
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
 
+    def test_prompt_rules_are_product_specific_and_photo_real(self):
+        client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
+        self.assertIn("name: '当地背景'", client)
+        self.assertIn("悉尼歌剧院轮廓、海港大桥", client)
+        self.assertIn("name: '产品配色'", client)
+        self.assertIn("只改变产品织物颜色", client)
+        self.assertIn("promptDetails", client)
+        self.assertIn("generationMode: 'quality'", client)
+        self.assertIn("不是插画、3D 渲染、平面示意图", client)
+        self.assertIn("全画幅商业摄影质感", client)
+
     def test_state_roundtrip(self):
         original_dir = server.DATA_DIR
         original_file = server.STATE_FILE
