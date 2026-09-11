@@ -1,28 +1,47 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-08T00:00:00+08:00",
+  "generatedAt": "2026-09-11T13:17:07+08:00",
   "title": "Design System: 创想设计平台",
   "extensions": {
     "colorMeta": {
-      "brand-deep": { "role": "primary", "displayName": "深夜紫", "canonical": "#302b68", "tonalRamp": ["#1b183b", "#302b68", "#41388f", "#5145b4", "#6658d6", "#aaa3ee", "#e8e5fb", "#f4f2ff"] },
-      "canvas": { "role": "neutral", "displayName": "冷灰画布", "canonical": "#f4f3f9", "tonalRamp": ["#272441", "#3f3b5c", "#6d6982", "#8d89a0", "#d4cfe4", "#e5e2ef", "#f4f3f9", "#ffffff"] }
+      "brand-deep": { "role": "primary", "displayName": "深夜紫", "canonical": "#302b68", "tonalRamp": ["#18152f", "#24204f", "#302b68", "#41388f", "#5145b4", "#8b82dd", "#d4cff2", "#f4f2ff"] },
+      "brand-primary": { "role": "primary", "displayName": "工作台紫", "canonical": "#5145b4", "tonalRamp": ["#1b173a", "#292259", "#3a317f", "#5145b4", "#6658d6", "#9187e2", "#c9c4f1", "#f4f2ff"] },
+      "brand-active": { "role": "primary", "displayName": "交互亮紫", "canonical": "#6658d6", "tonalRamp": ["#1d183f", "#2c2561", "#41358f", "#5849c1", "#6658d6", "#958be5", "#cec9f4", "#f5f3ff"] },
+      "brand-soft": { "role": "primary", "displayName": "紫雾底色", "canonical": "#f4f2ff", "tonalRamp": ["#24204f", "#41388f", "#6658d6", "#9187e2", "#b8b1eb", "#d8d4f5", "#e8e5fb", "#f4f2ff"] },
+      "text-primary": { "role": "neutral", "displayName": "墨紫正文", "canonical": "#272441", "tonalRamp": ["#171522", "#272441", "#3f3b5c", "#5b5773", "#77738c", "#aaa7b8", "#d9d7e0", "#f5f4f7"] },
+      "text-secondary": { "role": "neutral", "displayName": "雾灰说明", "canonical": "#6d6982", "tonalRamp": ["#252331", "#3f3b4e", "#575267", "#6d6982", "#8d89a0", "#aaa7b8", "#d4d1dc", "#f4f3f7"] },
+      "canvas": { "role": "neutral", "displayName": "冷灰画布", "canonical": "#f4f3f9", "tonalRamp": ["#272441", "#3f3b5c", "#6d6982", "#8d89a0", "#b9b6c7", "#d4cfe4", "#e5e2ef", "#f4f3f9"] },
+      "surface": { "role": "neutral", "displayName": "纯白工作面", "canonical": "#ffffff", "tonalRamp": ["#28272b", "#46454b", "#68676e", "#8a8990", "#b2b1b7", "#d6d5da", "#ededf0", "#ffffff"] },
+      "border": { "role": "neutral", "displayName": "冷紫分界线", "canonical": "#e5e2ef", "tonalRamp": ["#292631", "#484352", "#696272", "#898191", "#aaa2b4", "#c6c0d1", "#e5e2ef", "#f7f5fa"] },
+      "success": { "role": "tertiary", "displayName": "确认绿", "canonical": "#278765", "tonalRamp": ["#102b22", "#174535", "#1f664c", "#278765", "#42a983", "#78c8a9", "#b8e5d2", "#edf9f4"] },
+      "warning": { "role": "secondary", "displayName": "提醒琥珀", "canonical": "#9a620d", "tonalRamp": ["#312004", "#513507", "#744a09", "#9a620d", "#bf8122", "#dba85e", "#f0d29e", "#fff7e5"] }
     },
     "typographyMeta": {
-      "headline": { "displayName": "工作台标题", "purpose": "页面标题与批量配方标题。" },
-      "body": { "displayName": "界面正文", "purpose": "说明、表格和表单内容。" }
+      "headline": { "displayName": "工作台标题", "purpose": "页面标题与批量配方标题，依靠紧凑字距建立清晰层级。" },
+      "body": { "displayName": "界面正文", "purpose": "说明、表格和表单内容，优先保证高密度场景下的可读性。" },
+      "label": { "displayName": "操作标签", "purpose": "按钮、状态、字段名和紧凑元数据。" }
     },
     "shadows": [
-      { "name": "surface-low", "value": "0 2px 10px rgb(42 35 85 / 6%)", "purpose": "列表与卡片的轻微层级。" },
-      { "name": "overlay-medium", "value": "0 14px 34px rgb(42 35 85 / 10%)", "purpose": "抽屉、弹窗和高层操作。" }
+      { "name": "surface-low", "value": "0 2px 10px rgb(42 35 85 / 6%)", "purpose": "列表、卡片和常规工作面轻微抬升。" },
+      { "name": "primary-action", "value": "0 7px 18px rgb(81 69 180 / 20%)", "purpose": "强调当前视图唯一的主要动作。" },
+      { "name": "sidebar-edge", "value": "10px 0 30px rgb(30 24 69 / 9%)", "purpose": "固定侧栏与工作画布之间的柔和分层。" },
+      { "name": "overlay-medium", "value": "0 14px 34px rgb(42 35 85 / 10%)", "purpose": "弹窗、通知与高层操作。" },
+      { "name": "drawer-side", "value": "-18px 0 46px rgb(35 29 77 / 16%)", "purpose": "右侧产品详情抽屉。" }
     ],
     "motion": [
-      { "name": "drawer-enter", "value": "220ms cubic-bezier(.22, 1, .36, 1)", "purpose": "右侧产品抽屉进入。" }
+      { "name": "state-fast", "value": "180ms ease", "purpose": "按钮、导航、边框和选中状态反馈。" },
+      { "name": "image-hover", "value": "220ms cubic-bezier(.22, 1, .36, 1)", "purpose": "素材缩略图查看提示。" },
+      { "name": "drawer-enter", "value": "220ms cubic-bezier(.22, 1, .36, 1)", "purpose": "右侧产品抽屉进入。" },
+      { "name": "page-enter", "value": "260ms ease", "purpose": "路由页面轻微上移淡入。" }
     ],
     "breakpoints": [
       { "name": "phone", "value": "460px" },
+      { "name": "small", "value": "640px" },
       { "name": "compact", "value": "760px" },
       { "name": "sidebar-collapse", "value": "900px" },
-      { "name": "single-column", "value": "1040px" }
+      { "name": "single-column", "value": "1040px" },
+      { "name": "studio-compact", "value": "1180px" },
+      { "name": "batch-compact", "value": "1320px" }
     ]
   },
   "components": [
@@ -30,31 +49,74 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "每个视图的主要下一步动作。",
+      "description": "每个视图的唯一主要下一步动作。",
       "html": "<button class=\"ds-btn-primary\">确认并生成</button>",
-      "css": ".ds-btn-primary{min-height:42px;padding:0 18px;color:#fff;background:#5145b4;border:0;border-radius:10px;font:700 14px Aptos,Segoe UI,sans-serif}.ds-btn-primary:hover{background:#41388f}.ds-btn-primary:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+      "css": ".ds-btn-primary{display:inline-flex;min-height:42px;align-items:center;justify-content:center;padding:0 18px;color:var(--surface,#fff);background:var(--purple-700,#5145b4);border:1px solid var(--purple-700,#5145b4);border-radius:var(--radius-sm,10px);box-shadow:0 7px 18px rgb(81 69 180 / 20%);font:700 14px Aptos,\"Segoe UI\",sans-serif;transition:background 180ms ease,border-color 180ms ease}.ds-btn-primary:hover{background:var(--purple-800,#41388f);border-color:var(--purple-800,#41388f)}.ds-btn-primary:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "description": "返回、编辑和辅助操作，保持白色低强调表面。",
+      "html": "<button class=\"ds-btn-secondary\">返回修改</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;min-height:44px;align-items:center;justify-content:center;padding:0 16px;color:var(--ink-800,#3f3b5c);background:#fff;border:1px solid var(--line-strong,#d4cfe4);border-radius:var(--radius-sm,10px);font:700 14px Aptos,\"Segoe UI\",sans-serif;transition:border-color 180ms ease,box-shadow 180ms ease}.ds-btn-secondary:hover{border-color:#aaa3cb;box-shadow:var(--shadow-sm,0 2px 10px rgb(42 35 85 / 6%))}.ds-btn-secondary:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
     },
     {
       "name": "Search Field",
       "kind": "input",
-      "description": "产品库的主要查找控件。",
+      "description": "产品库和筛选区域的主要文本输入控件。",
       "html": "<input class=\"ds-search\" placeholder=\"搜索产品名称、SKU 或品类\">",
-      "css": ".ds-search{height:42px;padding:0 14px;color:#272441;background:#fff;border:1px solid #e5e2ef;border-radius:10px;font:400 14px Aptos,Segoe UI,sans-serif}.ds-search:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+      "css": ".ds-search{width:100%;min-height:42px;padding:0 11px;color:var(--ink-800,#3f3b5c);background:#fff;border:1px solid var(--line-strong,#d4cfe4);border-radius:var(--radius-sm,10px);font:400 14px Aptos,\"Segoe UI\",sans-serif}.ds-search:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}.ds-search::placeholder{color:var(--ink-500,#8d89a0)}"
+    },
+    {
+      "name": "Sidebar Navigation Item",
+      "kind": "nav",
+      "description": "深紫侧栏中的当前模块入口。",
+      "html": "<button class=\"ds-nav-item is-active\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><path d=\"m12 3-1.1 3.5L7.5 8l3.4 1.5L12 13l1.1-3.5L16.5 8l-3.4-1.5L12 3Z\"/></svg><span>创建设计</span></button>",
+      "css": ".ds-nav-item{display:grid;width:100%;min-height:45px;grid-template-columns:21px 1fr;align-items:center;gap:11px;padding:9px 12px;color:#cbc7e8;background:transparent;border:1px solid transparent;border-radius:11px;text-align:left;font:700 14px Aptos,\"Segoe UI\",sans-serif;transition:color 180ms ease,background 180ms ease}.ds-nav-item svg{width:19px}.ds-nav-item:hover{color:#fff;background:rgb(255 255 255 / 7%)}.ds-nav-item.is-active{color:#fff;background:#4b429c;border-color:rgb(255 255 255 / 8%);box-shadow:inset 3px 0 #f6d76e}.ds-nav-item:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
     },
     {
       "name": "Status Chip",
       "kind": "chip",
-      "description": "文本与颜色共同表达状态。",
+      "description": "使用文字和颜色共同表达完成状态。",
       "html": "<span class=\"ds-chip\">已有素材</span>",
-      "css": ".ds-chip{display:inline-flex;padding:4px 9px;color:#278765;background:#e6f5ef;border-radius:999px;font:700 11px Aptos,Segoe UI,sans-serif}"
+      "css": ".ds-chip{display:inline-flex;min-height:28px;align-items:center;padding:0 10px;color:var(--green,#278765);background:var(--green-bg,#e6f5ef);border-radius:999px;font:700 11px Aptos,\"Segoe UI\",sans-serif}"
+    },
+    {
+      "name": "Generation Mode Option",
+      "kind": "custom",
+      "description": "快速出图和精细出图的互斥模式选择。",
+      "html": "<button class=\"ds-mode is-selected\"><span class=\"ds-mode-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg></span><span><strong>快速出图</strong><small>Qwen Image 3.0 · 优先缩短等待</small></span></button>",
+      "css": ".ds-mode{display:grid;min-height:78px;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:10px;padding:12px;color:var(--ink-800,#3f3b5c);background:#f8f7fc;border:1px solid var(--line,#e5e2ef);border-radius:12px;text-align:left;transition:background 180ms ease,border-color 180ms ease,box-shadow 180ms ease}.ds-mode:hover{background:#f3f1fc;border-color:#b9b3d8}.ds-mode.is-selected{background:var(--purple-50,#f4f2ff);border-color:var(--purple-600,#6658d6);box-shadow:0 5px 14px rgb(48 43 104 / 10%)}.ds-mode-icon{display:grid;width:38px;height:38px;place-items:center;color:var(--purple-700,#5145b4);background:#fff;border-radius:10px}.ds-mode-icon svg{width:19px}.ds-mode strong,.ds-mode small{display:block}.ds-mode small{margin-top:3px;color:var(--ink-600,#6d6982)}.ds-mode:focus-visible{outline:3px solid rgb(102 88 214 / 28%);outline-offset:2px}"
+    },
+    {
+      "name": "SKU Result Card",
+      "kind": "card",
+      "description": "按 SKU 分组的生成结果缩略图，保留编号和提示词标签。",
+      "html": "<article class=\"ds-result\"><div class=\"ds-result-image\"><span>A</span></div><div class=\"ds-result-tags\"><span>悉尼</span><span>奶油白</span></div></article>",
+      "css": ".ds-result{width:180px;overflow:hidden;background:#eeeaf7;border-radius:8px}.ds-result-image{position:relative;display:grid;aspect-ratio:4/3;place-items:center;background:#efedf7}.ds-result-image>span{position:absolute;top:6px;left:6px;display:grid;width:22px;height:22px;place-items:center;color:#fff;background:rgb(36 32 79 / 84%);border-radius:6px;font:800 10px Aptos,\"Segoe UI\",sans-serif}.ds-result-tags{display:flex;gap:4px;padding:7px;background:#fff}.ds-result-tags span{padding:3px 6px;color:var(--ink-500,#8d89a0);background:var(--surface-soft,#f8f7fc);border-radius:6px;font:700 10px Aptos,\"Segoe UI\",sans-serif}"
     }
   ],
   "narrative": {
     "northStar": "安静的生产控制台",
-    "overview": "界面服务于频繁、批量的设计生产：高信息密度，但通过稳定网格、浅色分区和单一紫色动作色保持秩序。",
-    "keyCharacteristics": ["深紫导航与冷白工作区", "轻边框与低阴影", "明确的 SKU 分组和批量公式"],
-    "rules": [{ "name": "One Primary Action", "body": "每个视图只保留一个最高强调的下一步动作。", "section": "colors" }],
-    "dos": ["使用真实白底产品图作为视觉事实。", "让批量公式、进度和保存状态易于定位。"],
-    "donts": ["不要用场景图代替产品底图。", "不要让生成历史脱离 SKU 归属。"]
+    "overview": "界面服务于频繁、批量的设计生产：高信息密度，但通过稳定网格、浅色分区和单一紫色动作色保持秩序。图片是内容核心，装饰退居其后；状态、配方和 SKU 关系必须能被快速扫读。",
+    "keyCharacteristics": [
+      "深紫导航锚定全局位置，冷白工作区承载任务。",
+      "卡片轻边框、低阴影，避免浮夸层叠。",
+      "关键数字使用等宽数字特性，批量关系用明确公式表达。"
+    ],
+    "rules": [
+      { "name": "The One Primary Action Rule", "body": "每个视图只保留一个最高强调的下一步动作。", "section": "colors" }
+    ],
+    "dos": [
+      "Do 使用真实白底产品图作为产品库和创作参考图的视觉事实。",
+      "Do 让批量公式、进度和保存状态在首屏可定位。",
+      "Do 在手机端优先展示完成任务所需的核心字段。"
+    ],
+    "donts": [
+      "Don't 用场景效果图代替产品底图。",
+      "Don't 在创作流程中增加固定产品规格步骤；参考图可以与不同提示词自由组合。",
+      "Don't 把复杂提示词选项全部铺在主页面；使用摘要与编辑弹窗渐进展示。",
+      "Don't 让生成历史脱离 SKU 归属或丢失提示词标签。"
+    ]
   }
 }
