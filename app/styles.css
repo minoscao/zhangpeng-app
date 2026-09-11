@@ -381,6 +381,20 @@ body.overlay-open { overflow: hidden; }
 .add-group-button svg { width: 16px; }
 .workflow-section textarea { min-height: 88px; }
 
+.generation-mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.generation-mode-option { position: relative; display: grid; min-height: 78px; grid-template-columns: 38px minmax(0, 1fr) 22px; align-items: center; gap: 10px; padding: 12px; color: var(--ink-800); background: #f8f7fc; border: 1px solid var(--line); border-radius: 12px; text-align: left; transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+.generation-mode-option:hover { background: #f3f1fc; border-color: #b9b3d8; }
+.generation-mode-option.is-selected { background: var(--purple-50); border-color: var(--purple-600); box-shadow: 0 5px 14px rgb(48 43 104 / 10%); }
+.generation-mode-option:disabled { cursor: not-allowed; opacity: .68; }
+.generation-mode-icon { display: grid; width: 38px; height: 38px; place-items: center; color: var(--purple-700); background: white; border-radius: 10px; }
+.generation-mode-icon svg { width: 19px; }
+.generation-mode-option strong, .generation-mode-option small { display: block; }
+.generation-mode-option strong { font-size: 11px; }
+.generation-mode-option small { margin-top: 3px; color: var(--ink-600); font-size: 8px; line-height: 1.45; }
+.mode-check { display: grid; width: 22px; height: 22px; place-items: center; color: white; background: var(--purple-700); border-radius: 7px; }
+.mode-check svg { width: 13px; }
+.confirm-note { margin: 12px 0 0; color: var(--ink-600); font-size: 9px; line-height: 1.5; text-align: center; }
+
 .formula-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px; color: white; background: var(--purple-950); border-radius: 13px; }
 .formula-bar span, .formula-bar strong { display: block; }
 .formula-bar span { color: #b9b4dc; font-size: 9px; }
@@ -593,7 +607,7 @@ body.overlay-open { overflow: hidden; }
   .library-summary p { width: 100%; margin-left: 0; }
   .batch-main { padding: 15px; }
   .batch-title, .formula-bar { align-items: stretch; flex-direction: column; }
-  .selected-products, .picker-grid { grid-template-columns: 1fr; }
+  .selected-products, .picker-grid, .generation-mode-grid { grid-template-columns: 1fr; }
   .prompt-group-row { grid-template-columns: 1fr; }
   .prompt-row-actions { grid-column: auto; justify-content: flex-start; flex-wrap: wrap; }
   .formula-action { width: 100%; }

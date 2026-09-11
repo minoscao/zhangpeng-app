@@ -1,6 +1,10 @@
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const DASHSCOPE_MODELS_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
-const DEFAULT_MODEL = 'qwen-image-3.0-pro';
+const GENERATION_PROFILES = Object.freeze({
+  fast: Object.freeze({ model: 'qwen-image-3.0', enableThinking: false, promptExtend: false }),
+  quality: Object.freeze({ model: 'qwen-image-3.0-pro', enableThinking: true, promptExtend: true }),
+});
+const DEFAULT_PROFILE = 'fast';
 const MAX_PROMPT_LENGTH = 6000;
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const TASK_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
@@ -28,9 +32,14 @@ function publicConfig(env) {
   return {
     provider: 'qwen',
     userKeyRequired: true,
-    model: env.QWEN_MODEL || DEFAULT_MODEL,
+    model: GENERATION_PROFILES[DEFAULT_PROFILE].model,
+    generationProfiles: Object.keys(GENERATION_PROFILES),
     maxBatchSize: 24,
   };
+}
+
+function generationProfile(value) {
+  return GENERATION_PROFILES[value] || GENERATION_PROFILES[DEFAULT_PROFILE];
 }
 
 function qwenApiKey(request) {
@@ -88,7 +97,7 @@ async function validateQwenKey(apiKey, env) {
   const upstream = await fetch(env.DASHSCOPE_MODELS_URL || DASHSCOPE_MODELS_URL, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  if (upstream.ok) return jsonResponse({ valid: true, model: env.QWEN_MODEL || DEFAULT_MODEL });
+  if (upstream.ok) return jsonResponse({ valid: true, model: GENERATION_PROFILES[DEFAULT_PROFILE].model });
   const data = await upstream.json().catch(() => ({}));
   const code = upstream.status === 429 ? 'QWEN_RATE_LIMITED' : 'KEY_INVALID';
   return jsonResponse({ error: { code, message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 401);
@@ -116,6 +125,16 @@ async function createQwenTask(request, env, apiKey) {
   }
 
   const content = [...referenceImages.map((image) => ({ image })), { text: prompt }];
+  const profile = generationProfile(body.generationMode);
+  const parameters = {
+    negative_prompt: '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
+    size: SIZE_BY_RATIO[body.ratio] || SIZE_BY_RATIO['4:3'],
+    n: 1,
+    prompt_extend: profile.promptExtend,
+    watermark: false,
+    enable_thinking: profile.enableThinking,
+  };
+  if (profile.promptExtend) parameters.prompt_extend_mode = 'direct';
   const upstream = await fetch(`${env.DASHSCOPE_BASE_URL || DASHSCOPE_BASE_URL}/services/aigc/image-generation/generation`, {
     method: 'POST',
     headers: {
@@ -124,17 +143,9 @@ async function createQwenTask(request, env, apiKey) {
       'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
-      model: env.QWEN_MODEL || DEFAULT_MODEL,
+      model: profile.model,
       input: { messages: [{ role: 'user', content }] },
-      parameters: {
-        negative_prompt: '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
-        size: SIZE_BY_RATIO[body.ratio] || SIZE_BY_RATIO['4:3'],
-        n: 1,
-        prompt_extend: true,
-        prompt_extend_mode: 'direct',
-        watermark: false,
-        enable_thinking: true,
-      },
+      parameters,
     }),
   });
 
@@ -143,7 +154,7 @@ async function createQwenTask(request, env, apiKey) {
     if (upstream.status === 401 || data?.code === 'InvalidApiKey') return jsonResponse({ error: { code: 'KEY_INVALID', message: upstreamErrorMessage(data, upstream.status) } }, 401);
     return jsonResponse({ error: { code: data?.code || 'QWEN_UPSTREAM_ERROR', message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 502);
   }
-  return jsonResponse({ taskId: data.output.task_id, taskStatus: data.output.task_status || 'PENDING' }, 202);
+  return jsonResponse({ taskId: data.output.task_id, taskStatus: data.output.task_status || 'PENDING', model: profile.model }, 202);
 }
 
 async function getQwenTask(taskId, env, apiKey) {
