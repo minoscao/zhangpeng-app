@@ -29,6 +29,7 @@ run('state.ui.confirmBatch = true');
 assert.match(run('renderConfirmDialog()'), /Wan 2.6 Image/);
 assert.doesNotMatch(run('renderConfirmDialog()'), /TENT-2P-014/);
 assert.match(run('renderConfirmDialog()'), /预览首张图的实际提示词/);
+assert.match(run('renderConfirmDialog()'), /<details class="generation-summary" open>/);
 run("promptReview.entries[0].prompt += '\\n后面必须有小木屋，检验手动修改';");
 run('submitQwenBatch = async (results) => { state.studio.requirements = "中途改变的要求"; results.forEach((item) => { item.status = "ready"; item.image = "data:image/jpeg;base64,aW1hZ2U="; }); }; pollQwenBatch = async () => { activeGenerationId = ""; state.batch.status = "ready"; };');
 await run('startBatchGeneration()');
