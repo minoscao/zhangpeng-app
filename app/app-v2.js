@@ -451,6 +451,27 @@ function renderResultGroups() {
   }).join('');
 }
 
+function setStudioProvider(provider) {
+  if (!PROVIDERS[provider] || state.batch.status === 'generating') return;
+  state.studio.provider = provider;
+  if (!PROVIDERS[provider].profiles[state.studio.generationMode]) state.studio.generationMode = 'quality';
+  state.studio.model = generationProfile(state.studio.generationMode, provider).code;
+  saveState(); render(); $('#studio-provider')?.focus();
+  showToast('生成通道已切换', `接下来将使用 ${providerConfig(provider).name}。`, 'check');
+}
+
+function setStudioQuality(mode) {
+  if (!providerConfig().profiles[mode] || state.batch.status === 'generating') return;
+  state.studio.generationMode = mode;
+  state.studio.model = providerConfig().profiles[mode].code;
+  saveState(); render(); $('#studio-quality')?.focus();
+}
+
+function renderStudioSettings(batchRunning) {
+  const profile = generationProfile();
+  return `<div class="studio-settings-row" role="group" aria-label="模型与成片质量"><div><label for="studio-provider">模型服务</label><select id="studio-provider" class="select-control" ${batchRunning ? 'disabled' : ''}>${Object.entries(PROVIDERS).map(([provider, item]) => `<option value="${provider}" ${state.studio.provider === provider ? 'selected' : ''}>${escapeHtml(item.shortName)}</option>`).join('')}</select></div><div><label for="studio-quality">成片质量</label><select id="studio-quality" class="select-control" title="${escapeHtml(`${profile.model} · ${profile.detail}`)}" ${batchRunning ? 'disabled' : ''}>${Object.entries(providerConfig().profiles).map(([mode, item]) => `<option value="${mode}" ${state.studio.generationMode === mode ? 'selected' : ''}>${escapeHtml(mode === 'wan' ? '万相一致性' : item.name)}</option>`).join('')}</select></div></div>`;
+}
+
 function renderStudio() {
   const total = plannedTotal();
   const progress = batchProgress();
@@ -462,11 +483,10 @@ function renderStudio() {
   const durationValue = batchActive ? `${elapsedMinutes(state.batch.startedAtMs, state.batch.finishedAtMs)} 分钟` : estimatedDuration(total);
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
+    ${renderStudioSettings(batchRunning)}
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择模型服务</h3><p>OpenAI 与千问使用各自独立的临时密钥，可随时切换。</p></div></div><div class="generation-mode-grid provider-option-grid" role="group" aria-label="模型服务">${Object.entries(PROVIDERS).map(([provider, item]) => `<button class="generation-mode-option provider-option ${state.studio.provider === provider ? 'is-selected' : ''}" data-action="set-provider" data-provider="${provider}" aria-pressed="${state.studio.provider === provider}" ${batchRunning ? 'disabled' : ''}><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><span><strong>${item.name}</strong><small>${provider === 'openai' ? 'GPT Image 2 / 2.5 · 官方图像模型' : 'Qwen Image 3.0 / Pro · 阿里云百炼'}</small></span>${state.studio.provider === provider ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择成片质量</h3><p>默认使用精细成片；快速草图仅用于先确认构图与方向。</p></div></div><div class="generation-mode-grid" role="group" aria-label="成片质量">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>公共提示词区</h3><p>模板、补充要求与摄影标准对整批生效；城市背景统一在上方“当地背景”中设置。</p></div></div>${renderPublicPromptArea()}<label for="universal-prompt">通用摄影标准</label><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>公共提示词区</h3><p>模板与补充要求对整批生效；城市背景在上方“当地背景”中设置。</p></div></div>${renderPublicPromptArea()}</section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
@@ -1108,22 +1128,10 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'finish-prompt-editor') closeOverlay();
   if (action === 'set-provider') {
-    const provider = button.dataset.provider;
-    if (PROVIDERS[provider] && state.batch.status !== 'generating') {
-      state.studio.provider = provider;
-      if (!PROVIDERS[provider].profiles[state.studio.generationMode]) state.studio.generationMode = 'quality';
-      state.studio.model = generationProfile(state.studio.generationMode, provider).code;
-      saveState(); render();
-      showToast('生成通道已切换', `接下来将使用 ${providerConfig(provider).name}。`, 'check');
-    }
+    setStudioProvider(button.dataset.provider);
   }
   if (action === 'set-generation-mode') {
-    const mode = button.dataset.mode;
-    if (providerConfig().profiles[mode] && state.batch.status !== 'generating') {
-      state.studio.generationMode = mode;
-      state.studio.model = providerConfig().profiles[mode].code;
-      saveState(); render();
-    }
+    setStudioQuality(button.dataset.mode);
   }
   if (action === 'review-batch') {
     if (state.batch.status === 'generating') return;
@@ -1189,7 +1197,6 @@ document.addEventListener('input', (event) => {
   if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); } }
   if (event.target.id === 'design-requirements') { state.studio.requirements = event.target.value; saveState(); }
   if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); }
-  if (event.target.id === 'universal-prompt') { state.studio.universalPrompt = event.target.value; saveState(); }
   if (event.target.id === 'product-search') {
     state.ui.productSearch = event.target.value;
     const position = event.target.selectionStart;
@@ -1206,6 +1213,8 @@ document.addEventListener('toggle', (event) => {
 }, true);
 
 document.addEventListener('change', (event) => {
+  if (event.target.id === 'studio-provider') { setStudioProvider(event.target.value); return; }
+  if (event.target.id === 'studio-quality') { setStudioQuality(event.target.value); return; }
   if (event.target.id === 'public-prompt-template') { state.studio.publicPromptId = event.target.value; saveState(); render(); }
   if (event.target.dataset.resultReview) { const item = state.batch.results.find((result) => result.id === event.target.dataset.resultReview); if (item) { item.review = event.target.value; saveState(); } }
   if (event.target.id === 'batch-history' && event.target.value && state.batch.status !== 'generating') {
