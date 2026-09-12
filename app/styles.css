@@ -34,6 +34,24 @@
 
 /* Requirements-first production tools follow the incumbent workspace grid. */
 .public-prompt-area, .city-planner { display: grid; gap: 12px; margin-bottom: 24px; min-width: 0; }
+.template-rules summary, .generation-summary summary { cursor: pointer; padding-block: 10px; color: var(--purple-800); font-size: 13px; }
+.template-rules label { display: block; margin-bottom: 8px; }
+.template-rules .public-prompt-actions { margin-top: 12px; }
+.comparison-action { padding-block: 16px; border-top: 1px solid var(--line); }
+.final-prompt-review { display: grid; gap: 12px; margin-top: 20px; text-align: left; min-width: 0; }
+.final-prompt-review h3 { margin: 0; font-size: 16px; }
+.final-prompt-review p { margin: 0; color: var(--ink-600); font-size: 13px; }
+.final-prompt-review label { font-size: 13px; font-weight: 700; color: var(--ink-800); }
+.final-prompt-review .review-current-recipe { color: var(--ink-800); overflow-wrap: anywhere; }
+.final-prompt-review .select-control { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; }
+.final-prompt-review pre, .final-prompt-review textarea { width: 100%; margin: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink-950); background: var(--surface-soft); font: inherit; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.final-prompt-review pre { max-height: 320px; overflow: auto; }
+.final-prompt-review textarea { min-height: 320px; resize: vertical; }
+.final-prompt-review .field-error { color: var(--red); }
+.final-prompt-review .button { min-height: 44px; }
+.region-reference .location-rule { padding-inline: 0; }
+.region-reference textarea { min-height: 280px; }
+@media (max-width: 760px) { .final-prompt-review textarea, .final-prompt-review select, .region-reference textarea { font-size: 16px; } }
 .public-prompt-area label, .city-planner label { color: var(--ink-800); font-weight: 700; }
 .public-prompt-area textarea, .city-planner textarea { width: 100%; min-height: 110px; padding: 12px; color: var(--ink-950); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); resize: vertical; }
 .public-prompt-area .select-control, .city-planner .input-control, .batch-tools .select-control { width: 100%; max-width: 100%; min-height: 44px; }
