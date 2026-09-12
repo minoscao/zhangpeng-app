@@ -31,6 +31,14 @@ assert.doesNotMatch(run('renderConfirmDialog()'), /TENT-2P-014/);
 assert.match(run('renderConfirmDialog()'), /预览首张图的实际提示词/);
 assert.match(run('renderConfirmDialog()'), /<details class="generation-summary" open>/);
 run("promptReview.entries[0].prompt += '\\n后面必须有小木屋，检验手动修改';");
+const creditsBeforeConfirmation = run('state.credits');
+run('confirmCurrentPromptReview()');
+assert.equal(run('state.credits'), creditsBeforeConfirmation);
+assert.equal(run('state.ui.confirmBatch'), false);
+assert.equal(run('hasConfirmedPromptReview(true)'), true);
+assert.equal(run('hasConfirmedPromptReview(false)'), false);
+assert.equal(run('state.batch.results.length'), 0);
+run('comparisonRequested = true;');
 run('submitQwenBatch = async (results) => { state.studio.requirements = "中途改变的要求"; results.forEach((item) => { item.status = "ready"; item.image = "data:image/jpeg;base64,aW1hZ2U="; }); }; pollQwenBatch = async () => { activeGenerationId = ""; state.batch.status = "ready"; };');
 await run('startBatchGeneration()');
 assert.equal(run('state.batch.results.length'), 3);
@@ -46,6 +54,7 @@ assert.equal(run('state.savedAssets[0].prompt'), run('state.batch.results[0].pro
 assert.equal(run('state.savedAssets[0].demo'), false);
 
 run("state.studio.selectedProductIds = ['p-4']; comparisonRequested = false;");
+run('preparePromptReview(); confirmCurrentPromptReview();');
 await run('startBatchGeneration()');
 assert.equal(run('state.batchHistory.length'), 1);
 assert.equal(run('state.batchHistory[0].results.length'), 3);
@@ -120,7 +129,7 @@ assert.notEqual(run('reviewedPrompt(selectedProducts()[0], buildCombinations()[0
 assert.doesNotMatch(run('renderConfirmDialog()'), /Flinders Street Station/);
 run("state.studio.provider = 'qwen'; state.studio.generationMode = 'wan'; preparePromptReview(); promptReview.entries[0].prompt = '长'.repeat(2001);");
 const creditsBeforeInvalidPrompt = run('state.credits');
-await run('startBatchGeneration()');
+run('confirmCurrentPromptReview()');
 assert.equal(run('state.credits'), creditsBeforeInvalidPrompt);
 assert.equal(run('promptReviewEditing'), true);
 assert.match(run('promptReviewError'), /2000.*尚未提交或扣分/);
@@ -143,4 +152,51 @@ assert.match(run('renderComparisonSection(true)'), /data-action="review-comparis
 run('state.studio.selectedProductIds = [];');
 assert.match(run('renderComparisonSection(false)'), /先选择参考产品/);
 assert.match(run('renderComparisonSection(false)'), /data-action="review-comparison" disabled/);
-console.log('Studio prompt, comparison, batch snapshots, history, migration and recovery tests passed.');
+run('state = structuredClone(seedState); comparisonRequested = false; promptReviewEditing = false; confirmedPromptReviews = {batch: null, comparison: null}; activeGenerationId = "";');
+const unconfirmedCredits = run('state.credits');
+await run('startBatchGeneration()');
+assert.equal(run('state.credits'), unconfirmedCredits);
+assert.equal(run('state.batch.results.length'), 0);
+assert.match(run('renderStudio()'), /data-action="generate-batch" disabled/);
+assert.match(run('renderComparisonSection(false)'), /data-action="generate-comparison" disabled/);
+run('preparePromptReview(); state.ui.confirmBatch = true;');
+assert.match(run('renderConfirmDialog()'), /data-action="confirm-prompts"/);
+assert.doesNotMatch(run('renderConfirmDialog()'), /data-action="confirm-batch"|开始生成/);
+run('promptReview.entries[0].prompt = "确认过的精修儿童帐篷摄影提示词";');
+await clickAction('confirm-prompts');
+assert.equal(run('hasConfirmedPromptReview(false)'), true);
+assert.equal(run('state.credits'), unconfirmedCredits);
+assert.equal(run('state.ui.confirmBatch'), false);
+assert.match(run('renderStudio()'), /data-action="generate-batch" >/);
+assert.match(run('renderComparisonSection(false)'), /data-action="generate-comparison" disabled/);
+run('preparePromptReview();');
+assert.equal(run('promptReview.entries[0].prompt'), '确认过的精修儿童帐篷摄影提示词');
+await clickAction('edit-reviewed-prompt');
+assert.equal(run('hasConfirmedPromptReview(false)'), false);
+await clickAction('cancel-reviewed-prompt');
+await clickAction('confirm-prompts');
+for (const mutation of [
+  'state.studio.ratio = "1:1";',
+  'state.studio.generationMode = "fast";',
+  'state.studio.publicPromptId = "white";',
+  'state.promptGroups[0].options.find((option) => option.selected).quantity += 1;',
+  'state.studio.selectedProductIds = ["p-4"];',
+  'state.products[0].name += "修改";'
+]) {
+  run('state = structuredClone(seedState); comparisonRequested = false; preparePromptReview(); confirmCurrentPromptReview();');
+  assert.equal(run('hasConfirmedPromptReview(false)'), true);
+  run(mutation);
+  assert.equal(run('hasConfirmedPromptReview(false)'), false, mutation);
+}
+run('state = structuredClone(seedState); preparePromptReview(); confirmCurrentPromptReview(); checkProviderAuthorization = async () => { state.studio.ratio = "1:1"; return true; };');
+const creditsBeforeAuthorizationChange = run('state.credits');
+await run('startBatchGeneration()');
+assert.equal(run('state.credits'), creditsBeforeAuthorizationChange);
+assert.equal(run('state.batch.results.length'), 0);
+run('checkProviderAuthorization = async () => true; preparePromptReview(); promptReview.entries[0].prompt = "最终确认版本"; confirmCurrentPromptReview(); submitOpenAiBatch = async (results) => { results.forEach((item) => { item.status = "ready"; }); activeGenerationId = ""; state.batch.status = "ready"; };');
+await clickAction('generate-batch');
+assert.equal(run('state.batch.results.length'), 18);
+assert.equal(run('state.batch.results[0].prompt'), '最终确认版本');
+assert.equal(run('state.credits'), creditsBeforeAuthorizationChange - 54);
+assert.equal(run('hasConfirmedPromptReview(false)'), false);
+console.log('Studio prompt confirmation gates, comparison, batch snapshots, history, migration and recovery tests passed.');

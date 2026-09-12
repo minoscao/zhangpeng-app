@@ -170,6 +170,7 @@ let cityDraft = '';
 let cityPlannerError = '';
 let regionPreviewId = '';
 let promptReview = null;
+let confirmedPromptReviews = { batch: null, comparison: null };
 let promptReviewIndex = 0;
 let promptReviewEditing = false;
 let promptReviewDraft = '';
@@ -484,7 +485,7 @@ function renderComparisonSection(batchRunning) {
   const profiles = Object.values(provider.profiles);
   const product = selectedProducts()[0];
   const combo = buildCombinations()[0];
-  return `<section class="comparison-section" aria-labelledby="comparison-title"><div class="comparison-heading"><h3 id="comparison-title">小样模型对比</h3><span>${profiles.length} 张对比图 · ${profiles.length * CREDIT_PER_IMAGE} 积分</span></div><p>只取首个 SKU 和首个组合，各模型配置生成一张，共用同一提示词。配置差异直接列在下面。</p><ul class="comparison-model-list" aria-label="参与对比的模型配置">${profiles.map((profile) => `<li><strong>${escapeHtml(profile.name)}</strong><span>${escapeHtml(profile.model)}</span><small>${escapeHtml(profile.detail)} · 1 张 / ${CREDIT_PER_IMAGE} 积分</small></li>`).join('')}</ul>${product ? `<dl class="comparison-context"><div><dt>参考产品</dt><dd>${escapeHtml(product.sku)} · ${escapeHtml(product.name)}</dd></div><div><dt>首个组合</dt><dd>${escapeHtml(combo.tags.join(' / ') || '默认配方')}</dd></div></dl><h4>对比共用提示词</h4><pre class="comparison-prompt">${escapeHtml(generationPrompt(product, combo.tags, combo.promptDetails))}</pre>` : '<p class="comparison-empty">先选择参考产品，即可查看对比组合和实际提示词。</p>'}<p class="comparison-note">模型、质量及扩写配置可能不同，属于同配方成片对比。API 平台另按实际请求计费；查看此区不会调用生图或扣分。</p><button class="button button--secondary" data-action="review-comparison" ${batchRunning || !product ? 'disabled' : ''}>${svgIcon('layers')}检查提示词并对比生成</button></section>`;
+  return `<section class="comparison-section" aria-labelledby="comparison-title"><div class="comparison-heading"><h3 id="comparison-title">小样模型对比</h3><span>${profiles.length} 张对比图 · ${profiles.length * CREDIT_PER_IMAGE} 积分</span></div><p>只取首个 SKU 和首个组合，各模型配置生成一张，共用同一提示词。配置差异直接列在下面。</p><ul class="comparison-model-list" aria-label="参与对比的模型配置">${profiles.map((profile) => `<li><strong>${escapeHtml(profile.name)}</strong><span>${escapeHtml(profile.model)}</span><small>${escapeHtml(profile.detail)} · 1 张 / ${CREDIT_PER_IMAGE} 积分</small></li>`).join('')}</ul>${product ? `<dl class="comparison-context"><div><dt>参考产品</dt><dd>${escapeHtml(product.sku)} · ${escapeHtml(product.name)}</dd></div><div><dt>首个组合</dt><dd>${escapeHtml(combo.tags.join(' / ') || '默认配方')}</dd></div></dl><h4>对比共用提示词</h4><pre class="comparison-prompt">${escapeHtml((hasConfirmedPromptReview(true) ? confirmedPromptReviews.comparison.entries[0].prompt : generationPrompt(product, combo.tags, combo.promptDetails)))}</pre>` : '<p class="comparison-empty">先选择参考产品，即可查看对比组合和实际提示词。</p>'}<p class="comparison-note">模型、质量及扩写配置可能不同，属于同配方成片对比。API 平台另按实际请求计费；查看此区不会调用生图或扣分。</p>${renderGenerationControls(true, batchRunning || generationStarting || !product)}</section>`;
 }
 
 function renderStudio() {
@@ -502,7 +503,7 @@ function renderStudio() {
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
     ${renderComparisonSection(batchRunning)}
-    <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
+    <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div>${renderGenerationControls(false, batchRunning || generationStarting || !total || total > MAX_BATCH_SIZE)}</div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
@@ -575,8 +576,48 @@ function renderRegionPreview() {
   return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel region-reference" role="dialog" aria-modal="true" aria-labelledby="region-reference-title"><div class="modal-header"><div><h2 id="region-reference-title">${escapeHtml(option.label)} · 背景提示词</h2><p>地标、建筑与景观线索供参考，可直接修改。最终预览会包含当前配方对应地区的这些内容。</p></div><button class="icon-button overlay-close" data-action="back-regions" aria-label="返回地区选择">${svgIcon('x')}</button></div><div class="location-rule"><label for="region-${escapeHtml(option.id)}">地区地标与背景规则</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></div><p class="confirm-note">${option.description?.includes('AI') ? 'AI 推荐未经联网核验。' : '内置地区参考规则。'}白底模板不使用城市背景；其他模板按各自场景要求选择地标或住宅线索。</p><div class="modal-actions"><button class="button button--primary" data-action="back-regions">确认地区提示词</button></div></section></div>`;
 }
 
-function reviewFingerprint() {
-  return JSON.stringify([selectedProducts(), buildCombinations(), state.studio.publicPromptId, state.publicPrompts, state.studio.universalPrompt, state.studio.provider, state.studio.generationMode, comparisonRequested]);
+function reviewFingerprint(forComparison = comparisonRequested) {
+  return JSON.stringify([selectedProducts(), buildCombinations(), state.studio.publicPromptId, state.publicPrompts, state.studio.universalPrompt, state.studio.provider, state.studio.generationMode, state.studio.ratio, forComparison]);
+}
+
+function hasConfirmedPromptReview(forComparison = false) {
+  return confirmedPromptReviews[forComparison ? 'comparison' : 'batch']?.fingerprint === reviewFingerprint(forComparison);
+}
+
+function promptConfirmationText(forComparison = false) {
+  return hasConfirmedPromptReview(forComparison) ? '提示词已确认，可以生成；修改选项后需重新确认。' : '请先预览并确认提示词，再点击生成。';
+}
+
+function renderGenerationControls(forComparison, blocked) {
+  const mode = forComparison ? 'comparison' : 'batch';
+  return `<div class="generation-controls"><p data-confirmation-status="${mode}" role="status">${promptConfirmationText(forComparison)}</p><div class="generation-control-actions"><button class="button button--secondary" data-action="review-${mode}" ${blocked ? 'disabled' : ''}>预览并确认${forComparison ? '对比' : ''}提示词</button><button class="button button--primary" data-action="generate-${mode}" ${blocked || !hasConfirmedPromptReview(forComparison) ? 'disabled' : ''}>${svgIcon('sparkles')}${forComparison ? '生成对比图' : '生成素材'}</button></div></div>`;
+}
+
+function syncPromptConfirmationControls() {
+  for (const mode of ['batch', 'comparison']) {
+    const comparison = mode === 'comparison';
+    const button = document.querySelector(`[data-action="generate-${mode}"]`);
+    if (button) button.disabled = generationStarting || state.batch.status === 'generating' || !selectedProducts().length || (!comparison && (!plannedTotal() || plannedTotal() > MAX_BATCH_SIZE)) || !hasConfirmedPromptReview(comparison);
+    const status = document.querySelector(`[data-confirmation-status="${mode}"]`);
+    if (status) status.textContent = promptConfirmationText(comparison);
+  }
+}
+
+function validatePromptReview() {
+  const invalidIndex = promptReview.entries.findIndex((entry) => !entry.prompt.trim() || entry.prompt.length > promptReviewLimit());
+  if (invalidIndex < 0) return promptReview.entries.length > 0;
+  promptReviewIndex = invalidIndex; promptReviewEditing = true; promptReviewDraft = promptReview.entries[invalidIndex].prompt;
+  promptReviewError = `当前模型提示词上限为 ${promptReviewLimit()} 字，请精简后保存；尚未提交或扣分。`;
+  state.ui.confirmBatch = true; render(); $('#final-prompt-text')?.focus(); return false;
+}
+
+function confirmCurrentPromptReview() {
+  if (promptReviewEditing || !promptReview) return;
+  if (promptReview.fingerprint !== reviewFingerprint()) { preparePromptReview(); render(); showToast('选项已变更', '请重新检查并确认提示词。'); return; }
+  if (!validatePromptReview()) return;
+  confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch'] = structuredClone(promptReview);
+  closeOverlay();
+  showToast('提示词已确认', '未调用生图或扣分，现在可以在工作台点击生成。');
 }
 
 function promptReviewLimit() { return state.studio.provider === 'qwen' && (state.studio.generationMode === 'wan' || comparisonRequested) ? 2000 : 6000; }
@@ -584,7 +625,7 @@ function promptReviewLimit() { return state.studio.provider === 'qwen' && (state
 function preparePromptReview() {
   const combos = comparisonRequested ? buildCombinations().slice(0, 1) : buildCombinations();
   const products = comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts();
-  promptReview = { fingerprint: reviewFingerprint(), entries: products.flatMap((product) => combos.map((combo, comboIndex) => ({ key: `${product.id}:${comboIndex}`, label: `${product.sku} · ${combo.tags.join(' / ') || '默认配方'}`, prompt: generationPrompt(product, combo.tags, combo.promptDetails) }))) };
+  promptReview = hasConfirmedPromptReview(comparisonRequested) ? structuredClone(confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch']) : { fingerprint: reviewFingerprint(), entries: products.flatMap((product) => combos.map((combo, comboIndex) => ({ key: `${product.id}:${comboIndex}`, label: `${product.sku} · ${combo.tags.join(' / ') || '默认配方'}`, prompt: generationPrompt(product, combo.tags, combo.promptDetails) }))) };
   promptReviewIndex = 0; promptReviewEditing = false; promptReviewDraft = ''; promptReviewError = '';
 }
 
@@ -597,7 +638,7 @@ function renderPromptReview() {
   if (!promptReview || promptReview.fingerprint !== reviewFingerprint()) preparePromptReview();
   const entry = promptReview.entries[promptReviewIndex];
   if (!entry) return '';
-  return `<div class="final-prompt-review"><h3>预览首张图的实际提示词</h3><p>默认显示首张图，包含模板、产品规则和对应地区的地标背景。可切换检查其他配方；修改仅作用于当前配方，同配方模型对比共用修改后的提示词。</p><label for="prompt-review-entry">当前预览配方</label><select id="prompt-review-entry" class="select-control" ${promptReviewEditing ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p>${promptReviewEditing ? `<label for="final-prompt-text">修改实际提示词</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), promptReviewDraft.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}">${escapeHtml(promptReviewDraft)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<div class="public-prompt-actions"><button class="button button--primary" data-action="save-reviewed-prompt">保存修改</button><button class="button button--secondary" data-action="cancel-reviewed-prompt">取消修改</button></div>` : `<pre>${escapeHtml(entry.prompt)}</pre><button class="button button--secondary" data-action="edit-reviewed-prompt">${svgIcon('edit')}修改</button>`}<p id="prompt-review-help">检查与修改不调用生图接口；保存后才可开始生成，当前模型上限为 ${promptReviewLimit()} 字。返回修改上方选项后，会重新整理整批提示词。</p></div>`;
+  return `<div class="final-prompt-review"><h3>预览首张图的实际提示词</h3><p>默认显示首张图，包含模板、产品规则和对应地区的地标背景。可切换检查其他配方；修改仅作用于当前配方，同配方模型对比共用修改后的提示词。</p><label for="prompt-review-entry">当前预览配方</label><select id="prompt-review-entry" class="select-control" ${promptReviewEditing ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p>${promptReviewEditing ? `<label for="final-prompt-text">修改实际提示词</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), promptReviewDraft.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}">${escapeHtml(promptReviewDraft)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<div class="public-prompt-actions"><button class="button button--primary" data-action="save-reviewed-prompt">保存修改</button><button class="button button--secondary" data-action="cancel-reviewed-prompt">取消修改</button></div>` : `<pre>${escapeHtml(entry.prompt)}</pre><button class="button button--secondary" data-action="edit-reviewed-prompt">${svgIcon('edit')}修改</button>`}<p id="prompt-review-help">检查与修改不调用生图接口；保存并确认后，才可在工作台点击生成，当前模型上限为 ${promptReviewLimit()} 字。返回修改上方选项后，会重新整理整批提示词。</p></div>`;
 }
 
 function renderConfirmDialog() {
@@ -605,7 +646,7 @@ function renderConfirmDialog() {
   const total = plannedTotal();
   const profile = comparisonRequested ? { name: '同配方模型配置对比', model: Object.values(providerConfig().profiles).map((item) => item.model).join(' / ') } : generationProfile();
   const provider = providerConfig();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认调用 ${provider.shortName} 生成 ${total} 张素材？</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}首次使用会先提示输入对应密钥。</p>${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch" ${generationStarting || promptReviewEditing ? 'disabled' : ''}>${svgIcon('sparkles')}开始生成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
 }
 
 function renderApiKeyDialog() {
@@ -972,9 +1013,11 @@ function finishBatch(batchId) {
 
 async function startBatchGeneration() {
   if (generationStarting || promptReviewEditing || state.batch.status === 'generating' || activeGenerationId) return;
-  if (!promptReview || promptReview.fingerprint !== reviewFingerprint()) preparePromptReview();
-  const invalidIndex = promptReview.entries.findIndex((entry) => !entry.prompt.trim() || entry.prompt.length > promptReviewLimit());
-  if (invalidIndex >= 0) { promptReviewIndex = invalidIndex; promptReviewEditing = true; promptReviewDraft = promptReview.entries[invalidIndex].prompt; promptReviewError = `当前模型提示词上限为 ${promptReviewLimit()} 字，请精简后保存；尚未提交或扣分。`; state.ui.confirmBatch = true; render(); $('#final-prompt-text')?.focus(); return; }
+  const requestedComparison = comparisonRequested;
+  if (!hasConfirmedPromptReview(requestedComparison)) { syncPromptConfirmationControls(); showToast('请先确认提示词', '在预览窗口确认后，才能点击生成。'); return; }
+  const approvedReview = confirmedPromptReviews[requestedComparison ? 'comparison' : 'batch'];
+  promptReview = structuredClone(approvedReview);
+  if (!validatePromptReview()) return;
   generationStarting = true;
   try {
   const total = plannedTotal();
@@ -985,14 +1028,19 @@ async function startBatchGeneration() {
   if (!getProviderApiKey(provider)) { openApiKeyDialog(provider, 'generate'); return; }
   const authorized = await checkProviderAuthorization(provider, false);
   if (!authorized) { openApiKeyDialog(provider, 'generate'); keyDialogError = '密钥无效、无模型权限或 API 额度不可用，请检查后重新输入。'; render(); return; }
+  if (comparisonRequested !== requestedComparison || confirmedPromptReviews[requestedComparison ? 'comparison' : 'batch'] !== approvedReview || !hasConfirmedPromptReview(requestedComparison) || approvedReview.fingerprint !== reviewFingerprint(requestedComparison)) {
+    syncPromptConfirmationControls(); showToast('选项已变更', '请重新确认提示词，尚未提交或扣分。'); return;
+  }
+  promptReview = structuredClone(approvedReview);
   clearInterval(generationTimer);
-  const isComparison = comparisonRequested;
+  const isComparison = requestedComparison;
   const combinations = isComparison ? buildCombinations().slice(0, 1) : buildCombinations();
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
   const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
   const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
   const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false }))));
   if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
+  confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
   state.credits -= cost;
   state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
@@ -1004,7 +1052,7 @@ async function startBatchGeneration() {
     await submitQwenBatch(results, state.batch.id);
     if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
   }
-  } finally { generationStarting = false; }
+  } finally { generationStarting = false; syncPromptConfirmationControls(); }
 }
 
 async function regenerateResult(id) {
@@ -1107,7 +1155,8 @@ document.addEventListener('click', async (event) => {
   if (!button) return;
   const action = button.dataset.action;
   if (action === 'back-regions') { regionPreviewId = ''; render(); focusOverlay(); return; }
-  if (action === 'edit-reviewed-prompt') { promptReviewDraft = promptReview.entries[promptReviewIndex].prompt; promptReviewEditing = true; promptReviewError = ''; render(); $('#final-prompt-text')?.focus(); return; }
+  if (action === 'edit-reviewed-prompt') {
+    confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch'] = null; promptReviewDraft = promptReview.entries[promptReviewIndex].prompt; promptReviewEditing = true; promptReviewError = ''; render(); $('#final-prompt-text')?.focus(); return; }
   if (action === 'cancel-reviewed-prompt') { promptReviewEditing = false; promptReviewError = ''; render(); return; }
   if (action === 'save-reviewed-prompt') {
     const draft = promptReviewDraft.trim();
@@ -1199,7 +1248,11 @@ document.addEventListener('click', async (event) => {
     if (!selectedProducts().length) { showToast('请先选择产品', '至少选择一个 SKU 才能开始生成。', 'box'); return; }
     preparePromptReview(); rememberFocus(); state.ui.confirmBatch = true; render(); focusOverlay();
   }
-  if (action === 'confirm-batch' && !promptReviewEditing) await startBatchGeneration();
+  if (action === 'confirm-prompts') confirmCurrentPromptReview();
+  if (action === 'generate-batch' || action === 'generate-comparison') {
+    comparisonRequested = action === 'generate-comparison';
+    await startBatchGeneration();
+  }
   if (action === 'regenerate-result') await regenerateResult(button.dataset.id);
   if (action === 'check-result') await checkExistingResult(button.dataset.id);
   if (action === 'delete-result') { if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后删除结果。', 'info'); return; } state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
@@ -1255,8 +1308,8 @@ document.addEventListener('click', async (event) => {
 document.addEventListener('input', (event) => {
   if (event.target.id === 'final-prompt-text') { promptReviewDraft = event.target.value; }
   if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }
-  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); } }
-  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); }
+  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); syncPromptConfirmationControls(); } }
+  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); syncPromptConfirmationControls(); }
   if (event.target.id === 'product-search') {
     state.ui.productSearch = event.target.value;
     const position = event.target.selectionStart;
