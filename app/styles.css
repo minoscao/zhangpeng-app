@@ -37,7 +37,22 @@
 .template-rules summary, .generation-summary summary { cursor: pointer; padding-block: 10px; color: var(--purple-800); font-size: 13px; }
 .template-rules label { display: block; margin-bottom: 8px; }
 .template-rules .public-prompt-actions { margin-top: 12px; }
-.comparison-action { padding-block: 16px; border-top: 1px solid var(--line); }
+.comparison-section { display: grid; gap: 12px; padding-block: 20px; border-top: 1px solid var(--line); min-width: 0; }
+.comparison-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.comparison-heading h3 { margin: 0; font-size: 15px; }
+.comparison-heading span { color: var(--purple-800); font-size: 13px; font-weight: 700; }
+.comparison-section p { margin: 0; color: var(--ink-600); font-size: 13px; }
+.comparison-model-list { list-style: none; margin: 0; padding: 0; }
+.comparison-model-list li { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) minmax(0, 1.5fr); align-items: baseline; gap: 8px 12px; padding-block: 12px; border-bottom: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.comparison-model-list small { color: var(--ink-600); font-size: 12px; }
+.comparison-context { display: grid; gap: 8px; margin: 0; font-size: 13px; }
+.comparison-context > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 12px; }
+.comparison-context dt { color: var(--ink-600); }
+.comparison-context dd { margin: 0; color: var(--ink-800); overflow-wrap: anywhere; }
+.comparison-section h4 { margin: 0; font-size: 13px; }
+.comparison-prompt { margin: 0; max-height: 260px; overflow: auto; padding: 12px; color: var(--ink-800); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comparison-section > .button { justify-self: start; min-height: 44px; }
+@media (max-width: 760px) { .comparison-model-list li { grid-template-columns: repeat(2, minmax(0, 1fr)); } .comparison-model-list small { grid-column: 1 / -1; } .comparison-section > .button { width: 100%; } }
 .final-prompt-review { display: grid; gap: 12px; margin-top: 20px; text-align: left; min-width: 0; }
 .final-prompt-review h3 { margin: 0; font-size: 16px; }
 .final-prompt-review p { margin: 0; color: var(--ink-600); font-size: 13px; }

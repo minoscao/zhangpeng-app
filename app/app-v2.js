@@ -479,6 +479,14 @@ function renderStudioSettings(batchRunning) {
   return `<div class="studio-settings-row" role="group" aria-label="模型与成片质量"><div><label for="studio-provider">模型服务</label><select id="studio-provider" class="select-control" ${batchRunning ? 'disabled' : ''}>${Object.entries(PROVIDERS).map(([provider, item]) => `<option value="${provider}" ${state.studio.provider === provider ? 'selected' : ''}>${escapeHtml(item.shortName)}</option>`).join('')}</select></div><div><label for="studio-quality">成片质量</label><select id="studio-quality" class="select-control" title="${escapeHtml(`${profile.model} · ${profile.detail}`)}" ${batchRunning ? 'disabled' : ''}>${Object.entries(providerConfig().profiles).map(([mode, item]) => `<option value="${mode}" ${state.studio.generationMode === mode ? 'selected' : ''}>${escapeHtml(mode === 'wan' ? '万相一致性' : item.name)}</option>`).join('')}</select></div></div>`;
 }
 
+function renderComparisonSection(batchRunning) {
+  const provider = providerConfig();
+  const profiles = Object.values(provider.profiles);
+  const product = selectedProducts()[0];
+  const combo = buildCombinations()[0];
+  return `<section class="comparison-section" aria-labelledby="comparison-title"><div class="comparison-heading"><h3 id="comparison-title">小样模型对比</h3><span>${profiles.length} 张对比图 · ${profiles.length * CREDIT_PER_IMAGE} 积分</span></div><p>只取首个 SKU 和首个组合，各模型配置生成一张，共用同一提示词。配置差异直接列在下面。</p><ul class="comparison-model-list" aria-label="参与对比的模型配置">${profiles.map((profile) => `<li><strong>${escapeHtml(profile.name)}</strong><span>${escapeHtml(profile.model)}</span><small>${escapeHtml(profile.detail)} · 1 张 / ${CREDIT_PER_IMAGE} 积分</small></li>`).join('')}</ul>${product ? `<dl class="comparison-context"><div><dt>参考产品</dt><dd>${escapeHtml(product.sku)} · ${escapeHtml(product.name)}</dd></div><div><dt>首个组合</dt><dd>${escapeHtml(combo.tags.join(' / ') || '默认配方')}</dd></div></dl><h4>对比共用提示词</h4><pre class="comparison-prompt">${escapeHtml(generationPrompt(product, combo.tags, combo.promptDetails))}</pre>` : '<p class="comparison-empty">先选择参考产品，即可查看对比组合和实际提示词。</p>'}<p class="comparison-note">模型、质量及扩写配置可能不同，属于同配方成片对比。API 平台另按实际请求计费；查看此区不会调用生图或扣分。</p><button class="button button--secondary" data-action="review-comparison" ${batchRunning || !product ? 'disabled' : ''}>${svgIcon('layers')}检查提示词并对比生成</button></section>`;
+}
+
 function renderStudio() {
   const total = plannedTotal();
   const progress = batchProgress();
@@ -493,7 +501,7 @@ function renderStudio() {
     ${renderStudioSettings(batchRunning)}
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
-    <div class="public-prompt-actions comparison-action"><button class="button button--secondary" data-action="review-comparison">${svgIcon('layers')}小样模型对比</button><span>同一 SKU、同一组合、同一提示词；先预览检查，再确认生成。</span></div>
+    ${renderComparisonSection(batchRunning)}
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
@@ -1117,6 +1125,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'review-comparison') {
     if (state.batch.status === 'generating') return;
+    if (!selectedProducts().length) { showToast('请先选择产品', '至少选择一个 SKU 才能进行小样模型对比。', 'box'); return; }
     comparisonRequested = true; preparePromptReview(); state.ui.confirmBatch = true; rememberFocus(); render(); focusOverlay(); return;
   }
   if (action === 'close-overlay' && event.target !== button && button.matches('.drawer-backdrop, .modal-backdrop')) return;
