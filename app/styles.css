@@ -66,6 +66,12 @@
 .final-prompt-review .button { min-height: 44px; }
 .region-reference .location-rule { padding-inline: 0; }
 .region-reference textarea { min-height: 280px; }
+.style-rule pre { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; color: var(--ink-800); }
+.style-rule .button { min-height: 44px; }
+#style-prompt-text { min-height: 300px; }
+.style-reference .modal-header > div { min-width: 0; padding-right: 44px; }
+.style-reference .modal-header p, .style-reference .confirm-note { font-size: 12px; line-height: 1.6; }
+.style-reference .confirm-note { text-align: left; }
 @media (max-width: 760px) { .final-prompt-review textarea, .final-prompt-review select, .region-reference textarea { font-size: 16px; } }
 .public-prompt-area label, .city-planner label { color: var(--ink-800); font-weight: 700; }
 .public-prompt-area textarea, .city-planner textarea { width: 100%; min-height: 110px; padding: 12px; color: var(--ink-950); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); resize: vertical; }

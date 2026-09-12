@@ -112,7 +112,7 @@ assert.ok(simplifiedStudio.indexOf('公共提示词模板') > simplifiedStudio.i
 assert.ok(simplifiedStudio.indexOf('公共提示词模板') < simplifiedStudio.indexOf('class="prompt-group-list"'));
 assert.match(run('promptReview.entries[0].prompt'), /Flinders Street Station/);
 assert.doesNotMatch(run('generationPrompt(state.products[3], [], [])'), /必须落实的补充要求/);
-const clickAction = async (action) => { const button = {dataset: {action}}; await listeners.click({target: {closest: (selector) => selector === '[data-action]' ? button : null}}); };
+const clickAction = async (action, data = {}) => { const button = {dataset: {action, ...data}}; await listeners.click({target: {closest: (selector) => selector === '[data-action]' ? button : null}}); };
 await clickAction('edit-reviewed-prompt');
 assert.equal(run('promptReviewEditing'), true);
 listeners.input({target: {id:'final-prompt-text',value:' ' ,dataset:{}}});
@@ -210,4 +210,65 @@ await clickAction('generate-batch');
 assert.equal(run('state.batch.results.length'), 18);
 assert.equal(run('state.batch.comparison'), false);
 assert.equal(run('state.credits'), run('seedState.credits') - 54);
-console.log('Studio prompt confirmation gates, comparison, batch snapshots, history, migration and recovery tests passed.');
+run('state = structuredClone(seedState); activeGenerationId = ""; state.batch.status = "idle"; comparisonRequested = false;');
+const legacyStyles = run(`upgradeVisualStyleGroup({id: 'group-style', name: '视觉风格', enabled: false, options: [
+  {id: 'group-style-0', label: '北欧自然', selected: true, quantity: 2},
+  {id: 'group-style-1', label: '轻奢柔光', prompt: '保留我手动修改的规则', selected: false, quantity: 1},
+  {id: 'my-custom-style', label: '自然晨光', prompt: '我的晨光规则', selected: true, quantity: 1}
+]})`);
+assert.equal(legacyStyles.enabled, false);
+assert.equal(legacyStyles.options.length, 7);
+assert.equal(legacyStyles.options[0].id, 'group-style-0');
+assert.equal(legacyStyles.options[0].selected, true);
+assert.equal(legacyStyles.options[0].quantity, 2);
+assert.match(legacyStyles.options[0].prompt, /光线：.*\n色彩：/);
+assert.equal(legacyStyles.options[1].prompt, '保留我手动修改的规则');
+assert.equal(legacyStyles.options[2].prompt, '我的晨光规则');
+run("state.promptGroups.push({id: 'group-style', name: '视觉风格', enabled: true, options: [{id: 'group-style-0', label: '北欧自然', selected: true, quantity: 1}]}); applySavedState(structuredClone(state));");
+assert.equal(run('state.promptGroups.find((group) => group.id === "group-style").options.length'), 6);
+assert.equal(run('state.promptLibrary.find((group) => group.id === "group-style").options.length'), 6);
+for (const style of run('VISUAL_STYLE_OPTIONS')) {
+  for (const dimension of ['光线：', '色彩：', '材质：', '构图：', '避免：', '约束：']) assert.ok(style.prompt.includes(dimension), style.label + dimension);
+}
+run("state.ui.promptDialogGroupId = 'group-style';");
+assert.match(run('renderPromptDialog()'), /北欧自然 · 对应提示词/);
+assert.match(run('renderPromptDialog()'), /style-rule" open/);
+assert.match(run('renderPromptDialog()'), /光线：/);
+await clickAction('toggle-prompt-option', {groupId:'group-style', id:'style-dream'});
+assert.equal(run('stylePreviewId'), 'style-dream');
+assert.match(run('renderPromptDialog()'), /梦幻童趣 · 风格提示词/);
+assert.match(run('renderPromptDialog()'), /id="style-prompt-text"/);
+const styleCreditsBefore = run('state.credits');
+listeners.input({target:{id:'style-prompt-text',value:' ',dataset:{}}});
+await clickAction('save-style-prompt');
+assert.match(run('stylePromptError'), /1–1600/);
+assert.equal(run('stylePreviewId'), 'style-dream');
+listeners.input({target:{id:'style-prompt-text',value:'光线：自然晨光。色彩：保持帐篷配色。材质：棉麻纤维。构图：悉尼地标清楚。避免：卡通。',dataset:{}}});
+await clickAction('save-style-prompt');
+assert.equal(run('stylePreviewId'), '');
+assert.equal(run('state.credits'), styleCreditsBefore);
+run("state.promptGroups.find((group) => group.id === 'group-style').options.forEach((option) => { option.selected = option.id === 'style-dream'; }); preparePromptReview(); confirmCurrentPromptReview();");
+assert.equal(run('hasConfirmedPromptReview(false)'), true);
+assert.match(run('promptReview.entries[0].prompt'), /悉尼歌剧院/);
+assert.match(run('promptReview.entries[0].prompt'), /光线：自然晨光/);
+await clickAction('view-style-prompt', {id:'style-dream'});
+listeners.input({target:{id:'style-prompt-text',value:'精修真实摄影，改为柔和侧光，保持产品与地标。',dataset:{}}});
+await clickAction('save-style-prompt');
+assert.equal(run('hasConfirmedPromptReview(false)'), false);
+run("state.studio.publicPromptId = 'white'; preparePromptReview();");
+assert.doesNotMatch(run('promptReview.entries[0].prompt'), /悉尼歌剧院/);
+assert.match(run('promptReview.entries[0].prompt'), /改为柔和侧光/);
+run('applySavedState(structuredClone(state));');
+assert.equal(run('state.promptGroups.find((group) => group.id === "group-style").options.find((option) => option.id === "style-dream").prompt'), '精修真实摄影，改为柔和侧光，保持产品与地标。');
+run('closeOverlay();');
+assert.equal(run('stylePreviewId'), '');
+run('state = structuredClone(seedState); state.ui.promptDialogGroupId = "library";');
+await clickAction('add-library-group', {id:'group-style'});
+assert.equal(run('stylePreviewId'), 'style-nordic');
+assert.equal(run('state.promptGroups.find((group) => group.id === "group-style").options.filter((option) => option.selected).length'), 1);
+assert.equal(run('plannedTotal()'), 18);
+assert.match(run('renderPromptDialog()'), /北欧自然 · 风格提示词/);
+await clickAction('back-styles');
+assert.match(run('renderPromptDialog()'), /style-rule" open/);
+assert.equal(run('state.credits'), run('seedState.credits'));
+console.log('Studio visual style rules, selection previews, migration, prompt confirmation gates and batch tests passed.');

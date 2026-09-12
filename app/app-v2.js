@@ -51,7 +51,64 @@ const PUBLIC_PROMPT_TEMPLATES = [
 ];
 const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
 const DEFAULT_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确。成片必须呈现精修过的真实商业摄影质感：自然可信、大气克制、光线高级、材质纹理清晰，童趣但不幼稚。主体完整，不添加文字、商标与水印。';
+const VISUAL_STYLE_OPTIONS = [
+  {
+    "id": "style-nordic",
+    "label": "北欧自然",
+    "category": "家居自然",
+    "description": "亲子家居 · 干净自然、温润织物",
+    "prompt": "光线：室内采用大面积窗侧柔和日光；室外采用方向一致的柔和天光，阴影轻而有层次，不凭空添加窗户。\n色彩：环境采用中性低饱和色，白平衡自然，不给产品套米白滤镜。\n材质：突出棉麻纤维、木杆纹理、细致缝线与柔软但有张力的面料。\n构图：平视或轻微俯视，帐篷完整、空间舒展，保留当地背景的可识别细节。\n避免：避免灰蒙、过曝、样板间式空洞感。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  },
+  {
+    "id": "style-soft",
+    "label": "轻奢柔光",
+    "category": "品牌柔光",
+    "description": "品牌广告 · 柔和光线、立体高级质感",
+    "prompt": "光线：宽大柔光主光配克制轮廓光，面料明暗过渡细腻，接触阴影清楚。\n色彩：环境温润中性，产品主色准确，儿童肤色自然，避免整体金色滤镜。\n材质：棉帆布、包边和支架有真实细节，精修但不抹掉纤维与褶皱。\n构图：帐篷突出且完整，画面留白克制，景深保留地标与指定背景可辨识。\n避免：避免镀金装饰、虚假光晕、塑料感或浓重商业滤镜。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  },
+  {
+    "id": "style-commerce",
+    "label": "明亮电商",
+    "category": "电商清晰",
+    "description": "电商详情 · 清晰、准确、易辨识",
+    "prompt": "光线：均匀明亮的真实摄影布光，曝光准确，无死白高光和黑色死影。\n色彩：白平衡中性，产品配色忠实，不改变当地背景的自然颜色。\n材质：面料织纹、包边、接缝和连接件清晰，边缘干净，阴影真实。\n构图：帐篷完整不裁切，正面或三分之四视角，重点突出开口与结构；是否白底由公共模板决定。\n避免：避免因电商风格擅自去除当地背景、虚假锐化、悬浮或添加参数文字。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  },
+  {
+    "id": "style-documentary",
+    "label": "户外纪实",
+    "category": "户外纪实",
+    "description": "户外生活 · 可信自然、环境有地域感",
+    "prompt": "光线：采用与所选地区和场景一致的自然天光，太阳方向和地面阴影一致。\n色彩：保持植物、建筑与肤色真实，色彩清透克制，不做橙青电影调色。\n材质：保留户外使用中合理的布料张力和微褶皱，产品干净且高级。\n构图：自然平视、真实透视与尺度，产品在前景完整，当地地标清楚但不抢主体；人物只按模板要求出现。\n避免：避免过度虚化背景、脏旧产品、极端广角、旅游明信片式地标拼贴。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  },
+  {
+    "id": "style-dream",
+    "label": "梦幻童趣",
+    "category": "梦幻童趣",
+    "description": "儿童品牌 · 梦幻氛围、真实摄影",
+    "prompt": "光线：可信的柔和侧光或逆光，轻盈明亮，保留布料与地面的真实受光。\n色彩：环境色彩轻柔通透，梦幻感来自协调色彩和光线，产品仍遵循所选配色。\n材质：棉麻纤维、印花边界与支架材质清楚可见，不做玩具塑胶质感。\n构图：儿童视角、舒展构图，帐篷完整；梦幻感来自现有场景，不凭空增加动物、城堡或星球，印花元素只按所选元素要求出现。\n避免：避免插画、3D 卡通、仙境替代城市、漂浮物、霓虹或虚假发光。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  },
+  {
+    "id": "style-editorial",
+    "label": "高端画册",
+    "category": "高端画册",
+    "description": "产品手册 · 大气留白、设计感构图",
+    "prompt": "光线：有方向的柔和主光，控制对比，亮部与暗部都保留织物细节。\n色彩：环境色调克制自然，帐篷配色准确，以真实材质对比形成层次。\n材质：高级商业精修，纤维、缝线、包边和支架都真实，不用过度磨皮。\n构图：产品完整，留出适合后续排版的干净空间，不直接生成文字；背景线索仍清楚可辨，不因留白删掉指定地标。\n避免：避免海报字样、伪品牌标识、重滤镜、空洞影棚感或产品裁切。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "selected": false,
+    "quantity": 1
+  }
+];
 const CORE_PROMPT_GROUPS = Object.freeze({
+  'group-style': { id: 'group-style', name: '视觉风格', enabled: true, options: VISUAL_STYLE_OPTIONS },
   'group-location': Object.freeze({
     id: 'group-location', name: '当地背景', enabled: true,
     options: Object.freeze([
@@ -144,7 +201,7 @@ const seedState = {
   promptLibrary: [
     { id: 'group-scene', name: '使用场景', options: ['儿童房', '阅读角', '后院草地', '露营营地'] },
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
-    { id: 'group-style', name: '视觉风格', options: ['北欧自然', '轻奢柔光', '明亮电商', '户外纪实'] },
+    { id: 'group-style', name: '视觉风格', options: VISUAL_STYLE_OPTIONS.map((option) => option.label) },
   ],
   publicPrompts: PUBLIC_PROMPT_TEMPLATES,
   batchHistory: [],
@@ -169,6 +226,9 @@ let cityPlannerBusy = false;
 let cityDraft = '';
 let cityPlannerError = '';
 let regionPreviewId = '';
+let stylePreviewId = '';
+let stylePromptDraft = '';
+let stylePromptError = '';
 let promptReview = null;
 let confirmedPromptReviews = { batch: null, comparison: null };
 let promptReviewIndex = 0;
@@ -205,6 +265,7 @@ function upgradeCorePromptGroups(groups) {
   if (!Array.isArray(groups)) return structuredClone(seedState.promptGroups);
   return groups.map((group) => {
     const template = CORE_PROMPT_GROUPS[group.id];
+    if (group.id === 'group-style') return upgradeVisualStyleGroup(group);
     if (!template) return group;
     const existingOptions = Array.isArray(group.options) ? group.options : [];
     const templateIds = new Set(template.options.map((option) => option.id));
@@ -217,6 +278,31 @@ function upgradeCorePromptGroups(groups) {
   });
 }
 
+function upgradeVisualStyleGroup(group) {
+  const options = Array.isArray(group.options) ? group.options : [];
+  const upgraded = options.map((option) => {
+    const definition = VISUAL_STYLE_OPTIONS.find((item) => item.id === option.id || item.label === option.label);
+    if (!definition) return { ...option, prompt: option.prompt || `光线：真实柔和摄影光线。\n色彩：保持产品配色与自然环境色。\n材质：面料与支架细节清晰。\n构图：产品完整，指定背景可辨识。\n风格要求：${option.label}。\n约束：真实商业摄影，不覆盖产品结构、当地背景或公共模板。` };
+    return { ...structuredClone(definition), ...option, description: definition.description, category: definition.category, prompt: option.prompt && option.prompt !== option.label ? option.prompt : definition.prompt };
+  });
+  for (const definition of VISUAL_STYLE_OPTIONS) {
+    if (!upgraded.some((option) => option.id === definition.id || option.label === definition.label)) upgraded.push(structuredClone(definition));
+  }
+  return { ...group, options: upgraded };
+}
+
+function openStylePrompt(option) {
+  stylePreviewId = option.id; stylePromptDraft = option.prompt || option.label; stylePromptError = '';
+}
+
+function saveStylePrompt() {
+  const option = state.promptGroups.find((group) => group.id === 'group-style')?.options.find((item) => item.id === stylePreviewId);
+  const draft = stylePromptDraft.trim();
+  if (!draft || draft.length > 1600) { stylePromptError = '请输入 1–1600 字的风格提示词。'; render(); $('#style-prompt-text')?.focus(); return; }
+  if (option) { option.prompt = draft; saveState(); }
+  stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay();
+}
+
 function applySavedState(saved) {
   if (![6, 7, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
@@ -226,6 +312,9 @@ function applySavedState(saved) {
     if (!saved.studio?.universalPrompt || saved.studio.universalPrompt === LEGACY_UNIVERSAL_PROMPT) state.studio.universalPrompt = DEFAULT_UNIVERSAL_PROMPT;
     if (saved.schemaVersion === 6) { state.studio.generationMode = 'quality'; state.studio.model = providerConfig(state.studio.provider).profiles.quality.code; }
   }
+  state.promptGroups = state.promptGroups.map((group) => group.id === 'group-style' ? upgradeVisualStyleGroup(group) : group);
+  const styleLibrary = state.promptLibrary.find((group) => group.id === 'group-style');
+  if (styleLibrary) styleLibrary.options = [...new Set([...VISUAL_STYLE_OPTIONS.map((option) => option.label), ...(Array.isArray(styleLibrary.options) ? styleLibrary.options : [])])];
   if (!saved.studio?.generationMode) state.studio.generationMode = 'quality';
   if (!saved.studio?.provider || !PROVIDERS[state.studio.provider]) state.studio.provider = 'openai';
   if (!saved.batch?.generationMode && saved.batch?.results?.length) state.batch.generationMode = 'quality';
@@ -557,7 +646,18 @@ function renderProductPicker() {
   return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel product-picker" role="dialog" aria-modal="true" aria-labelledby="product-picker-title"><div class="modal-header"><div><h2 id="product-picker-title">选择批量产品</h2><p>可同时选择多个 SKU；每个产品使用自己的真实底图。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭产品选择">${svgIcon('x')}</button></div><div class="picker-grid">${state.products.map((product) => `<button class="picker-product ${selected.has(product.id) ? 'is-selected' : ''}" data-action="toggle-picker-product" data-id="${product.id}" aria-pressed="${selected.has(product.id)}"><span class="picker-check">${selected.has(product.id) ? svgIcon('check') : ''}</span><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.sku)}</small></span></button>`).join('')}</div><div class="modal-actions"><span class="selection-count">已选择 ${selected.size} 个产品</span><button class="button button--primary" data-action="finish-product-picker" ${selected.size ? '' : 'disabled'}>完成选择</button></div></section></div>`;
 }
 
+function renderStyleEditor(group) {
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="style-editor-title"><div class="modal-header"><div><h2 id="style-editor-title">视觉风格</h2><p>按成片方向选择；每种风格统一规定光线、色彩、材质、构图和避免项。选中后自动展示提示词，可修改。多选会分别生成，不把不同风格混到一张图。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭视觉风格">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${escapeHtml(option.id)}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '自定义风格')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${escapeHtml(option.id)}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${escapeHtml(option.id)}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div><details class="location-rule style-rule" ${option.selected ? 'open' : ''}><summary>${escapeHtml(option.label)} · 对应提示词</summary><pre>${escapeHtml(option.prompt)}</pre><button class="button button--secondary" data-action="view-style-prompt" data-id="${escapeHtml(option.id)}">查看或修改提示词</button></details></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增自定义风格</label><div><input id="new-option-label" class="input-control" maxlength="40" placeholder="输入风格名称"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">已选 ${selectedOptions(group).length} 种风格 · ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+}
+
+function renderStylePreview() {
+  const option = state.promptGroups.find((group) => group.id === 'group-style')?.options.find((item) => item.id === stylePreviewId);
+  if (!option) return '';
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel region-reference style-reference" role="dialog" aria-modal="true" aria-labelledby="style-reference-title"><div class="modal-header"><div><h2 id="style-reference-title">${escapeHtml(option.label)} · 风格提示词</h2><p>${escapeHtml(option.description || '自定义视觉风格')}。确认保存后，本风格的规则会进入最终实际提示词。</p></div><button class="icon-button overlay-close" data-action="back-styles" aria-label="返回风格选择">${svgIcon('x')}</button></div><div class="location-rule"><label for="style-prompt-text">光线 / 色彩 / 材质 / 构图 / 避免项</label><textarea id="style-prompt-text" maxlength="1600" aria-describedby="style-prompt-help${stylePromptError ? ' style-prompt-error' : ''}" aria-invalid="${Boolean(stylePromptError)}">${escapeHtml(stylePromptDraft)}</textarea>${stylePromptError ? `<p id="style-prompt-error" class="field-error" role="alert">${escapeHtml(stylePromptError)}</p>` : ''}</div><p id="style-prompt-help" class="confirm-note">仅影响摄影视觉语言，不覆盖当地背景、产品配色或公共模板。保存后仍需在最终预览确认整批提示词；此处不调用生图或扣分。</p><div class="modal-actions"><button class="button button--secondary" data-action="back-styles">返回选择</button><button class="button button--primary" data-action="save-style-prompt">确认风格提示词</button></div></section></div>`;
+}
+
 function renderPromptDialog() {
+  if (stylePreviewId) return renderStylePreview();
   if (regionPreviewId) return renderRegionPreview();
   const dialogId = state.ui.promptDialogGroupId;
   if (!dialogId) return '';
@@ -567,6 +667,7 @@ function renderPromptDialog() {
   const group = state.promptGroups.find((item) => item.id === dialogId);
   if (!group) return '';
   if (group.id === 'group-location') return renderLocationEditor(group);
+  if (group.id === 'group-style') return renderStyleEditor(group);
   return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
@@ -678,7 +779,7 @@ function render() {
 function rememberFocus() { lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
 function focusOverlay() { requestAnimationFrame(() => $('.overlay-panel .overlay-close, .overlay-panel button, .overlay-panel input')?.focus()); }
 function closeOverlay() {
-  regionPreviewId = '';
+  regionPreviewId = ''; stylePreviewId = ''; stylePromptDraft = ''; stylePromptError = '';
   comparisonRequested = false;
   imagePreview = null;
   keyDialogOpen = false;
@@ -829,14 +930,14 @@ function openApiKeyDialog(provider = state.studio.provider, action = '') {
 function generationPrompt(product, tags, promptDetails = []) {
   const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
   const rules = template?.id === 'white' || template?.backgroundMode === 'none' ? (promptDetails.length ? promptDetails : tags).filter((tag) => !tag.startsWith('当地背景：')) : (promptDetails.length ? promptDetails : tags);
-  const combination = rules.map((tag) => tag.replace('：', '要求为')).join('；');
+  const combination = rules.map((tag) => tag.replace('：', '要求为').replace(/[。；\\s]+$/, '')).join('；');
   return [
     '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
     `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
     '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
     `场景任务：${template?.prompt || ''}`,
     '验收优先级：产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
-    combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料。` : '',
+    combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料，视觉风格仅控制摄影语言，不覆盖产品配色、指定地标或场景模板。` : '',
     state.studio.universalPrompt,
     '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
     '产品质感：清楚表现织物纤维、包边、缝线、褶皱张力和支架材质；边缘干净、接触阴影可信，避免塑料感、蜡感、过度磨皮、结构变形和悬浮感。',
@@ -1154,6 +1255,9 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const action = button.dataset.action;
+  if (action === 'back-styles') { stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay(); return; }
+  if (action === 'save-style-prompt') { saveStylePrompt(); return; }
+  if (action === 'view-style-prompt') { const option = state.promptGroups.find((group) => group.id === 'group-style')?.options.find((item) => item.id === button.dataset.id); if (option) openStylePrompt(option); render(); focusOverlay(); return; }
   if (action === 'back-regions') { regionPreviewId = ''; render(); focusOverlay(); return; }
   if (action === 'edit-reviewed-prompt') {
     confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch'] = null; promptReviewDraft = promptReview.entries[promptReviewIndex].prompt; promptReviewEditing = true; promptReviewError = ''; render(); $('#final-prompt-text')?.focus(); return; }
@@ -1209,8 +1313,12 @@ document.addEventListener('click', async (event) => {
   if (action === 'delete-prompt-group') { state.promptGroups = state.promptGroups.filter((item) => item.id !== button.dataset.id); saveState(); render(); }
   if (action === 'add-library-group') {
     const source = state.promptLibrary.find((item) => item.id === button.dataset.id);
-    if (source && !state.promptGroups.some((item) => item.id === source.id)) state.promptGroups.push({ id: source.id, name: source.name, enabled: true, options: source.options.map((label, index) => ({ id: `${source.id}-${index}`, label, selected: index < 2, quantity: 1 })) });
+    if (source && !state.promptGroups.some((item) => item.id === source.id)) {
+      if (source.id === 'group-style') { const group = structuredClone(CORE_PROMPT_GROUPS['group-style']); group.options[0].selected = true; state.promptGroups.push(group); }
+      else state.promptGroups.push({ id: source.id, name: source.name, enabled: true, options: source.options.map((label, index) => ({ id: `${source.id}-${index}`, label, selected: index < 2, quantity: 1 })) });
+    }
     state.ui.promptDialogGroupId = source?.id || '';
+    if (source?.id === 'group-style') openStylePrompt(state.promptGroups.find((group) => group.id === source.id).options.find((option) => option.selected) || state.promptGroups.find((group) => group.id === source.id).options[0]);
     saveState(); render(); focusOverlay();
   }
   if (action === 'create-custom-group') {
@@ -1223,6 +1331,7 @@ document.addEventListener('click', async (event) => {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const option = group?.options.find((item) => item.id === button.dataset.id);
     if (option) option.selected = !option.selected;
     if (group?.id === 'group-location' && option?.selected) regionPreviewId = option.id;
+    if (group?.id === 'group-style' && option?.selected) openStylePrompt(option);
     saveState(); render(); focusOverlay();
   }
   if (action === 'change-option-quantity') {
@@ -1233,7 +1342,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'add-prompt-option') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const input = $('#new-option-label'); const label = input?.value.trim();
     if (group?.id === 'group-location' && label) { await enrichCity(label); return; }
-    if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); saveState(); render(); focusOverlay(); } else input?.focus();
+    if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); if (group.id === 'group-style') { const upgraded = upgradeVisualStyleGroup(group); group.options = upgraded.options; openStylePrompt(group.options.find((option) => option.label === label)); } saveState(); render(); focusOverlay(); } else input?.focus();
   }
   if (action === 'finish-prompt-editor') closeOverlay();
   if (action === 'set-provider') {
@@ -1306,6 +1415,7 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'style-prompt-text') { stylePromptDraft = event.target.value; stylePromptError = ''; }
   if (event.target.id === 'final-prompt-text') { promptReviewDraft = event.target.value; }
   if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }
   if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); syncPromptConfirmationControls(); } }
