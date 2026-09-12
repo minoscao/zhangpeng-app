@@ -166,6 +166,8 @@ let pendingKeyAction = '';
 let keyDialogProvider = 'openai';
 let imagePreview = null;
 let cityPlannerBusy = false;
+let cityDraft = '';
+let cityPlannerError = '';
 let comparisonRequested = false;
 let durableStateDb;
 let storageWarningShown = false;
@@ -381,11 +383,11 @@ function renderSelectedProducts() {
 }
 
 function renderPromptGroups() {
-  if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。添加当地背景、产品配色或使用场景后，系统会自动计算组合数量。</div>';
+  if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。<button class="button button--secondary" data-action="open-location">添加当地背景</button></div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
     const options = selectedOptions(group);
     return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip">${escapeHtml(option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions"><button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button><button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button><button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button></div></article>`;
-  }).join('')}</div>`;
+  }).join('')}</div>${state.promptGroups.some((group) => group.id === 'group-location') ? '' : '<button class="button button--secondary" data-action="open-location">添加当地背景</button>'}`;
 }
 
 function variantLabel(index) { const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; return index < 26 ? alphabet[index] : `${alphabet[index % 26]}${Math.floor(index / 26) + 1}`; }
@@ -395,33 +397,37 @@ function renderPublicPromptArea() {
   return `<div class="public-prompt-area"><label for="public-prompt-template">公共提示词模板</label><select id="public-prompt-template" class="select-control">${state.publicPrompts.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === template.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select><label for="public-prompt-content">模板要求 · 每张图共用</label><textarea id="public-prompt-content" maxlength="800">${escapeHtml(template.prompt)}</textarea><div class="public-prompt-actions"><input id="public-prompt-name" class="input-control" maxlength="40" aria-label="另存模板名称" placeholder="新模板名称"><button class="button button--secondary" data-action="save-public-prompt">另存模板</button></div><label for="design-requirements">补充要求 · 必须在图中出现</label><textarea id="design-requirements" maxlength="800" placeholder="例如：帐篷开口完整可见，后面必须是小木屋。城市地标无需逐个填写。">${escapeHtml(state.studio.requirements)}</textarea><details class="prompt-preview"><summary>预览首张图的实际提示词</summary><pre>${escapeHtml(selectedProducts()[0] ? generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails) : '先选择参考产品。')}</pre></details><div class="public-prompt-actions"><button class="button button--secondary" data-action="review-comparison">${svgIcon('layers')}小样模型对比</button><span>同一 SKU、同一组合、同一提示词；确认后才付费生成。</span></div></div>`;
 }
 
-function renderCityPlanner() {
-  const locations = state.promptGroups.find((group) => group.id === 'group-location');
-  return `<div class="city-planner"><label for="city-name">AI 地域背景助手</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" placeholder="只输入城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全…' : '补全并选择城市'}</button></div><p id="city-planner-help">内置城市直接使用地域库；新城市由当前通道的文字 AI 推荐地标、住宅与景观，API 按量计费。推荐未经联网核验，可展开地域细节查看和编辑。</p>${locations ? `<details><summary>查看已选地点的地域细节</summary>${selectedOptions(locations).map((item) => `<div class="result-audit"><label for="region-${escapeHtml(item.id)}">${escapeHtml(item.label)} · 背景规则</label><textarea id="region-${escapeHtml(item.id)}" data-region-prompt="${escapeHtml(item.id)}" maxlength="1600">${escapeHtml(item.prompt || item.label)}</textarea></div>`).join('')}</details>` : ''}</div>`;
+function renderLocationEditor(group) {
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="location-editor-title"><div class="modal-header"><div><h2 id="location-editor-title">当地背景</h2><p>选择多个城市参与批量组合；城市选择、背景补全与规则编辑都在这里完成。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭当地背景">${svgIcon('x')}</button></div><div class="city-planner"><label for="city-name">添加城市</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" value="${escapeHtml(cityDraft)}" placeholder="国家或城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help${cityPlannerError ? ' city-planner-error' : ''}" aria-invalid="${Boolean(cityPlannerError)}"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全背景…' : '添加并补全背景'}</button></div>${cityPlannerError ? `<p id="city-planner-error" class="field-error" role="alert">${escapeHtml(cityPlannerError)}</p>` : ''}<p id="city-planner-help">已有城市直接选用，不重复调用 AI。新城市由当前模型通道的文字 AI 补全背景，API 按量计费，推荐未经联网核验。添加不会取消其他城市。</p></div><div class="option-editor-list">${group.options.map((option) => `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}" ${cityPlannerBusy ? 'disabled' : ''}><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '展开查看背景规则')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>＋</button></div></div><details class="location-rule"><summary>${escapeHtml(option.label)} · 查看或修改背景规则</summary><label for="region-${escapeHtml(option.id)}">生图背景要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></details></div>`).join('')}</div><div class="modal-actions"><span class="selection-count">已选 ${selectedOptions(group).length} 个城市 · ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
 async function enrichCity(label) {
-  if (cityPlannerBusy || !label?.trim()) return;
+  if (cityPlannerBusy) return;
+  cityDraft = String(label || '').trim();
+  cityPlannerError = '';
+  if (!cityDraft || cityDraft.length > 80) { cityPlannerError = '请输入 1–80 字的国家或城市名称。'; render(); requestAnimationFrame(() => $('#city-name')?.focus()); return; }
+  label = cityDraft;
   const provider = state.studio.provider;
   let group = state.promptGroups.find((item) => item.id === 'group-location');
   if (!group) { group = structuredClone(CORE_PROMPT_GROUPS['group-location']); state.promptGroups.push(group); }
   label = label.trim();
   let option = group.options.find((item) => item.id === label.toLowerCase() || item.label === label || item.label.includes(label) || item.label.toLowerCase().includes(label.toLowerCase()));
   if (!option?.prompt || option.prompt === option.label) {
-    if (!getProviderApiKey(provider)) { showToast('先连接模型', '新城市需要文字 AI 补全。输入密钥后再次选择城市即可。', 'info'); openApiKeyDialog(provider, 'check'); return; }
+    if (!getProviderApiKey(provider)) { openApiKeyDialog(provider, `city:${label}`); return; }
     cityPlannerBusy = true;
     render();
     try {
       const output = await apiJson(`/api/${provider}/plan-city`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city: label }) });
-      option = { id: uid('city'), label, prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验', selected: true, quantity: 1 };
-      group.options.push(option);
-    } catch (error) { showToast('城市补全失败', `${error.message}。已保留原有地域选项。`, 'info'); return; }
+      if (option) Object.assign(option, { prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验' });
+      else { option = { id: uid('city'), label, prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验', selected: true, quantity: 1 }; group.options.push(option); }
+    } catch (error) { cityPlannerError = `${error.message}。已保留城市输入和原有选项，可重试。`; return; }
     finally { cityPlannerBusy = false; render(); }
   }
   group.enabled = true;
-  group.options.forEach((item) => { item.selected = item.id === option.id; });
+  option.selected = true;
+  cityDraft = '';
   saveState(); render();
-  showToast('当地背景已准备', `${option.label} 的建筑与景观规则已加入配方，可展开查看。`, 'check');
+  showToast('城市已加入当地背景', `${option.label} 已选中，其他城市与数量保持不变；可展开查看背景规则。`, 'check');
 }
 
 function renderBatchTools() {
@@ -460,7 +466,7 @@ function renderStudio() {
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择模型服务</h3><p>OpenAI 与千问使用各自独立的临时密钥，可随时切换。</p></div></div><div class="generation-mode-grid provider-option-grid" role="group" aria-label="模型服务">${Object.entries(PROVIDERS).map(([provider, item]) => `<button class="generation-mode-option provider-option ${state.studio.provider === provider ? 'is-selected' : ''}" data-action="set-provider" data-provider="${provider}" aria-pressed="${state.studio.provider === provider}" ${batchRunning ? 'disabled' : ''}><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><span><strong>${item.name}</strong><small>${provider === 'openai' ? 'GPT Image 2 / 2.5 · 官方图像模型' : 'Qwen Image 3.0 / Pro · 阿里云百炼'}</small></span>${state.studio.provider === provider ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择成片质量</h3><p>默认使用精细成片；快速草图仅用于先确认构图与方向。</p></div></div><div class="generation-mode-grid" role="group" aria-label="成片质量">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>公共提示词区</h3><p>需求先满足，摄影质感再精修。模板可复用和另存；仅保存在当前浏览器。</p></div></div>${renderCityPlanner()}${renderPublicPromptArea()}<label for="universal-prompt">通用摄影标准</label><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>公共提示词区</h3><p>模板、补充要求与摄影标准对整批生效；城市背景统一在上方“当地背景”中设置。</p></div></div>${renderPublicPromptArea()}<label for="universal-prompt">通用摄影标准</label><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
@@ -523,6 +529,7 @@ function renderPromptDialog() {
   }
   const group = state.promptGroups.find((item) => item.id === dialogId);
   if (!group) return '';
+  if (group.id === 'group-location') return renderLocationEditor(group);
   return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
@@ -1029,6 +1036,7 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const action = button.dataset.action;
+  if (action === 'open-location') { if (!state.promptGroups.some((group) => group.id === 'group-location')) state.promptGroups.push(structuredClone(CORE_PROMPT_GROUPS['group-location'])); state.ui.promptDialogGroupId = 'group-location'; rememberFocus(); saveState(); render(); focusOverlay(); return; }
   if (action === 'plan-city') { await enrichCity($('#city-name')?.value.trim()); return; }
   if (action === 'save-public-prompt') {
     const name = $('#public-prompt-name')?.value.trim();
@@ -1041,7 +1049,7 @@ document.addEventListener('click', async (event) => {
     if (state.batch.status === 'generating') return;
     comparisonRequested = true; state.ui.confirmBatch = true; rememberFocus(); render(); focusOverlay(); return;
   }
-  if (action === 'close-overlay' && event.target !== button && button.classList.contains('drawer-backdrop')) return;
+  if (action === 'close-overlay' && event.target !== button && button.matches('.drawer-backdrop, .modal-backdrop')) return;
   if (action === 'close-image-preview' && event.target !== button && button.classList.contains('image-preview-backdrop')) return;
   if (action === 'open-import') openImport();
   if (action === 'close-modal') closeImport();
@@ -1171,11 +1179,13 @@ document.addEventListener('click', async (event) => {
     if (nextAction.startsWith('regenerate:')) await regenerateResult(nextAction.slice('regenerate:'.length));
     if (nextAction.startsWith('check-result:')) await checkExistingResult(nextAction.slice('check-result:'.length));
     if (nextAction === 'resume') await resumePendingBatch();
+    if (nextAction.startsWith('city:')) await enrichCity(nextAction.slice('city:'.length));
   }
   if (action === 'shutdown-app') { button.disabled = true; showToast('正在退出', '产品、词组与生成状态已保存。', 'power'); try { await fetch('/api/shutdown', { method: 'POST' }); } catch { /* desktop host may close */ } }
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }
   if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); } }
   if (event.target.id === 'design-requirements') { state.studio.requirements = event.target.value; saveState(); }
   if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); }

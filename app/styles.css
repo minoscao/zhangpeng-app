@@ -46,6 +46,14 @@
 .result-audit { padding-block: 12px; border-bottom: 1px solid var(--line); min-width: 0; }
 .result-audit strong { overflow-wrap: anywhere; }
 .result-audit label { display: grid; gap: 8px; }
+.location-rule { padding: 4px 12px 12px; }
+.location-rule summary { padding-block: 10px; color: var(--purple-800); cursor: pointer; font-size: 13px; }
+.location-rule label { display: block; margin-bottom: 8px; color: var(--ink-800); font-weight: 700; }
+.location-rule textarea { width: 100%; min-height: 120px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink-950); background: var(--surface); resize: vertical; }
+.location-editor .city-planner .field-error { color: var(--red); }
+.location-editor .option-toggle { min-width: 0; }
+.location-editor .option-copy { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .location-editor input, .location-rule textarea { font-size: 16px; } }
 .batch-tools { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
 .page--batch .result-grid { grid-template-columns: minmax(0, 1fr); }
 .page--batch .result-card img { width: 100%; }
