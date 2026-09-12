@@ -205,7 +205,7 @@ const seedState = {
   ],
   publicPrompts: PUBLIC_PROMPT_TEMPLATES,
   batchHistory: [],
-  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
+  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', otherRequirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
   ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
@@ -591,6 +591,7 @@ function renderStudio() {
     ${renderStudioSettings(batchRunning)}
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
+    <section class="other-requirements"><label for="studio-other-requirements">其他要求</label><textarea id="studio-other-requirements" maxlength="1200" rows="4" aria-describedby="other-requirements-help" placeholder="例如：帐篷上出现小恐龙与星星；孩子在入口旁阅读；保留当地地标，画面不要文字或水印。">${escapeHtml(state.studio.otherRequirements || '')}</textarea><p id="other-requirements-help">填写其他提示词、元素、构图或禁止项，会合并到每张图的总提示词，不增加生成数量。修改后需重新确认总提示词。</p></section>
     ${renderComparisonSection(batchRunning)}
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div>${renderGenerationControls(false, batchRunning || generationStarting || !total || total > MAX_BATCH_SIZE)}</div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
@@ -678,7 +679,7 @@ function renderRegionPreview() {
 }
 
 function reviewFingerprint(forComparison = comparisonRequested) {
-  return JSON.stringify([selectedProducts(), buildCombinations(), state.studio.publicPromptId, state.publicPrompts, state.studio.universalPrompt, state.studio.provider, state.studio.generationMode, state.studio.ratio, forComparison]);
+  return JSON.stringify([selectedProducts(), buildCombinations(), state.studio.publicPromptId, state.publicPrompts, state.studio.universalPrompt, state.studio.otherRequirements, state.studio.provider, state.studio.generationMode, state.studio.ratio, forComparison]);
 }
 
 function hasConfirmedPromptReview(forComparison = false) {
@@ -739,7 +740,7 @@ function renderPromptReview() {
   if (!promptReview || promptReview.fingerprint !== reviewFingerprint()) preparePromptReview();
   const entry = promptReview.entries[promptReviewIndex];
   if (!entry) return '';
-  return `<div class="final-prompt-review"><h3>预览首张图的实际提示词</h3><p>默认显示首张图，包含模板、产品规则和对应地区的地标背景。可切换检查其他配方；修改仅作用于当前配方，同配方模型对比共用修改后的提示词。</p><label for="prompt-review-entry">当前预览配方</label><select id="prompt-review-entry" class="select-control" ${promptReviewEditing ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p>${promptReviewEditing ? `<label for="final-prompt-text">修改实际提示词</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), promptReviewDraft.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}">${escapeHtml(promptReviewDraft)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<div class="public-prompt-actions"><button class="button button--primary" data-action="save-reviewed-prompt">保存修改</button><button class="button button--secondary" data-action="cancel-reviewed-prompt">取消修改</button></div>` : `<pre>${escapeHtml(entry.prompt)}</pre><button class="button button--secondary" data-action="edit-reviewed-prompt">${svgIcon('edit')}修改</button>`}<p id="prompt-review-help">检查与修改不调用生图接口；保存并确认后，才可在工作台点击生成，当前模型上限为 ${promptReviewLimit()} 字。返回修改上方选项后，会重新整理整批提示词。</p></div>`;
+  return `<div class="final-prompt-review"><h3>预览首张图的实际提示词</h3><p>总提示词汇总参考产品、公共模板、当前配方的当地背景、产品配色、视觉风格、其他要求及真实摄影标准。默认显示首张图，可切换检查其他配方；修改仅作用于当前配方，同配方模型对比共用修改后的提示词。</p><label for="prompt-review-entry">当前预览配方</label><select id="prompt-review-entry" class="select-control" ${promptReviewEditing ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p>${promptReviewEditing ? `<label for="final-prompt-text">修改实际提示词</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), promptReviewDraft.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}">${escapeHtml(promptReviewDraft)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<div class="public-prompt-actions"><button class="button button--primary" data-action="save-reviewed-prompt">保存修改</button><button class="button button--secondary" data-action="cancel-reviewed-prompt">取消修改</button></div>` : `<pre>${escapeHtml(entry.prompt)}</pre><button class="button button--secondary" data-action="edit-reviewed-prompt">${svgIcon('edit')}修改</button>`}<p id="prompt-review-help">检查与修改不调用生图接口；保存并确认后，才可在工作台点击生成，当前模型上限为 ${promptReviewLimit()} 字。返回修改上方选项后，会重新整理整批提示词。</p></div>`;
 }
 
 function renderConfirmDialog() {
@@ -938,6 +939,8 @@ function generationPrompt(product, tags, promptDetails = []) {
     `场景任务：${template?.prompt || ''}`,
     '验收优先级：产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
     combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料，视觉风格仅控制摄影语言，不覆盖产品配色、指定地标或场景模板。` : '',
+    `画幅比例：${state.studio.ratio}。`,
+    state.studio.otherRequirements?.trim() ? `其他要求（每张图共用，保留用户原意并与上述要求共同落实）：\n${state.studio.otherRequirements.trim()}` : '',
     state.studio.universalPrompt,
     '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
     '产品质感：清楚表现织物纤维、包边、缝线、褶皱张力和支架材质；边缘干净、接触阴影可信，避免塑料感、蜡感、过度磨皮、结构变形和悬浮感。',
@@ -1415,6 +1418,7 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'studio-other-requirements') { state.studio.otherRequirements = event.target.value; saveState(); syncPromptConfirmationControls(); const product = selectedProducts()[0]; const combo = buildCombinations()[0]; const preview = $('.comparison-prompt'); if (preview && product) preview.textContent = generationPrompt(product, combo.tags, combo.promptDetails); }
   if (event.target.id === 'style-prompt-text') { stylePromptDraft = event.target.value; stylePromptError = ''; }
   if (event.target.id === 'final-prompt-text') { promptReviewDraft = event.target.value; }
   if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }

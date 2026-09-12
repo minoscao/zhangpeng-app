@@ -430,6 +430,12 @@ body.overlay-open { overflow: hidden; }
 .studio-settings-row .select-control { width: 100%; min-width: 0; min-height: 44px; max-width: none; }
 @media (max-width: 760px) { .studio-settings-row .select-control { font-size: 16px; } }
 .workflow-section { padding: 21px 0; border-top: 1px solid var(--line); }
+.other-requirements { display: grid; gap: 10px; padding-block: 20px; border-top: 1px solid var(--line); min-width: 0; }
+.other-requirements label { color: var(--ink-800); font-size: 14px; font-weight: 700; }
+.other-requirements textarea { width: 100%; min-height: 130px; padding: 12px; color: var(--ink-800); background: white; border: 1px solid var(--line-strong); border-radius: 10px; font: inherit; font-size: 14px; line-height: 1.6; resize: vertical; }
+.other-requirements textarea:focus { outline: 2px solid var(--purple-600); outline-offset: 2px; }
+.other-requirements p { margin: 0; color: var(--ink-600); font-size: 12px; line-height: 1.6; }
+@media (max-width: 760px) { .other-requirements textarea { font-size: 16px; } }
 .workflow-heading { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 15px; }
 .workflow-heading h3, .workflow-heading p { margin: 0; }
 .workflow-heading h3 { font-size: 15px; }
