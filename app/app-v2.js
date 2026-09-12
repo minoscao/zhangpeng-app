@@ -41,13 +41,21 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
+const PUBLIC_PROMPT_TEMPLATES = [
+  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和补充要求；不能用漂亮但无关的背景代替指定环境。要求的背景元素必须看得清，不可用过度虚化隐藏。' },
+  { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
+  { id: 'cabin', name: '木屋自然庭院', prompt: '帐篷位于开阔自然庭院，后方必须有清楚可辨的真实小木屋、木质立面和自然植被。采用所选地区的住宅与景观风格，不要求城市地标；地域规则中的天际线是备选，不得替代本模板指定的小木屋。' },
+  { id: 'family', name: '亲子生活摄影', prompt: '儿童在帐篷旁自然玩耍，帐篷关键开口与支架完整可见。必须落实所选城市背景与产品面料配色，人物不抢产品主体，生活动作真实而非摆拍。' },
+  { id: 'white', name: '白底电商精修', backgroundMode: 'none', prompt: '输出纯白背景真实产品摄影，帐篷完整居中且比例准确、面料纹理与接触阴影清晰。不出现人物、建筑、城市景观或道具；此模板不使用当地背景规则，只落实产品配色和产品细节。' },
+];
 const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
 const DEFAULT_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确。成片必须呈现精修过的真实商业摄影质感：自然可信、大气克制、光线高级、材质纹理清晰，童趣但不幼稚。主体完整，不添加文字、商标与水印。';
 const CORE_PROMPT_GROUPS = Object.freeze({
   'group-location': Object.freeze({
     id: 'group-location', name: '当地背景', enabled: true,
     options: Object.freeze([
+      Object.freeze({ id: 'melbourne', label: '澳大利亚·墨尔本', description: '雅拉河水岸、墨尔本天际线或维州木屋庭院', prompt: '地点为澳大利亚墨尔本 Melbourne：城市方案采用雅拉河 Yarra River 水岸公园视角，远景清晰可辨墨尔本 CBD 天际线及弗林德斯街车站 Flinders Street Station 的黄赭色立面与绿色穹顶轮廓；木屋方案采用维多利亚州近郊木质小屋和开阔草坪庭院。根据公共模板选择城市或木屋方案，不混拼不相关城市地标，不把墨尔本写成悉尼，不用普通无地域背景替代。背景元素必须可见但不得遮挡帐篷', selected: false, quantity: 1 }),
       Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '海港地标、海滨公园与明亮自然光', prompt: '采用澳大利亚悉尼的高端户外生活背景，从悉尼歌剧院轮廓、海港大桥、海滨公园或当地明亮现代住宅中选择一至两项自然融入远景；保持真实空间关系和当地清透日光，地标只作为可识别的环境线索，不遮挡或抢过帐篷主体，避免旅游明信片感和生硬拼贴', selected: true, quantity: 1 }),
       Object.freeze({ id: 'dubai', label: '阿联酋·迪拜', description: '现代天际线、沙漠庭院与棕榈绿洲', prompt: '采用阿联酋迪拜的高端家庭户外背景，从现代天际线、沙漠庭院、浅色石材建筑或棕榈绿洲中选择一至两项自然融入环境；使用当地温暖阳光和克制奢华的空间语言，背景真实大气但不抢帐篷主体，避免夸张地标堆砌', selected: true, quantity: 2 }),
       Object.freeze({ id: 'suzhou', label: '中国·苏州', description: '现代江南庭院、白墙黛瓦与水岸绿意', prompt: '采用中国苏州的现代江南家庭背景，从白墙黛瓦、当代庭院、水岸绿意或园林窗景中选择一至两项自然融入远景；光线柔和通透，传统线索克制现代，保持真实住宅尺度，不做古装影楼或旅游景点式布景', selected: false, quantity: 1 }),
@@ -81,6 +89,7 @@ const PROVIDERS = Object.freeze({
     profiles: Object.freeze({
       fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 5 }),
       quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '开启深度思考，画质优先', submitLimit: 5, concurrency: 5 }),
+      wan: Object.freeze({ name: '万相 · 产品一致性', model: 'Wan 2.6 Image', code: 'wan2.6-image', detail: '参考图编辑 · 关闭扩写，保留明确需求', submitLimit: 5, concurrency: 2 }),
     }),
   }),
 });
@@ -118,15 +127,15 @@ const seedState = {
   schemaVersion: CURRENT_SCHEMA_VERSION,
   credits: 2680,
   products: productDefinitions.map(seedProduct),
-  savedAssets: seedSavedAssets,
+  savedAssets: seedSavedAssets.map((asset) => ({ ...asset, demo: true, tags: [...asset.tags, '演示图 · 非实际生成'] })),
   templates: [
     { id: 'tpl-tent', name: '帐篷批量创作', tag: '行业模板', image: RESULT_IMAGES[0], description: '按 SKU 与提示词组合批量生产创意素材', fields: 8 },
     { id: 'tpl-product', name: '通用商品图', tag: '通用模板', image: RESULT_IMAGES[1], description: '适配不同品类的电商主图与细节展示', fields: 4 },
     { id: 'tpl-scene', name: '场景换图', tag: '图像编辑', image: RESULT_IMAGES[2], description: '保留产品主体，快速替换使用环境', fields: 3 },
   ],
   projects: [
-    { id: 'pr-1', name: '三款帐篷区域素材批次', type: '批量创作', image: RESULT_IMAGES[0], updated: '12 分钟前' },
-    { id: 'pr-2', name: '儿童帐篷多配色方案', type: '提示词组合', image: RESULT_IMAGES[1], updated: '昨天' },
+    { id: 'pr-1', name: '三款帐篷区域素材批次', type: '演示批次 · 非实际生成', image: RESULT_IMAGES[0], updated: '示例' },
+    { id: 'pr-2', name: '儿童帐篷多配色方案', type: '演示批次 · 非实际生成', image: RESULT_IMAGES[1], updated: '示例' },
   ],
   promptGroups: [
     structuredClone(CORE_PROMPT_GROUPS['group-location']),
@@ -137,7 +146,9 @@ const seedState = {
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
     { id: 'group-style', name: '视觉风格', options: ['北欧自然', '轻奢柔光', '明亮电商', '户外纪实'] },
   ],
-  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
+  publicPrompts: PUBLIC_PROMPT_TEMPLATES,
+  batchHistory: [],
+  studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
   ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
@@ -154,6 +165,32 @@ let keyDialogError = '';
 let pendingKeyAction = '';
 let keyDialogProvider = 'openai';
 let imagePreview = null;
+let cityPlannerBusy = false;
+let comparisonRequested = false;
+let durableStateDb;
+let storageWarningShown = false;
+let generationStarting = false;
+
+function stateDatabase() {
+  durableStateDb ||= new Promise((resolve, reject) => {
+    const request = indexedDB.open('designflow-images', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('state');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return durableStateDb;
+}
+
+async function persistDurableState(snapshot) {
+  const db = await stateDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('state', 'readwrite');
+    transaction.objectStore('state').put(snapshot, 'current');
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
 
 function upgradeCorePromptGroups(groups) {
   if (!Array.isArray(groups)) return structuredClone(seedState.promptGroups);
@@ -172,20 +209,24 @@ function upgradeCorePromptGroups(groups) {
 }
 
 function applySavedState(saved) {
-  if (![6, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
+  if (![6, 7, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
     state.schemaVersion = CURRENT_SCHEMA_VERSION;
     state.promptGroups = upgradeCorePromptGroups(state.promptGroups);
     if (!saved.studio?.universalPrompt || saved.studio.universalPrompt === LEGACY_UNIVERSAL_PROMPT) state.studio.universalPrompt = DEFAULT_UNIVERSAL_PROMPT;
-    state.studio.generationMode = 'quality';
-    state.studio.model = providerConfig(state.studio.provider).profiles.quality.code;
+    if (saved.schemaVersion === 6) { state.studio.generationMode = 'quality'; state.studio.model = providerConfig(state.studio.provider).profiles.quality.code; }
   }
   if (!saved.studio?.generationMode) state.studio.generationMode = 'quality';
   if (!saved.studio?.provider || !PROVIDERS[state.studio.provider]) state.studio.provider = 'openai';
   if (!saved.batch?.generationMode && saved.batch?.results?.length) state.batch.generationMode = 'quality';
   if (saved.batch?.results?.length && !PROVIDERS[state.batch.provider]) state.batch.provider = 'qwen';
   if (!state.connection.authenticated || typeof state.connection.authenticated !== 'object' || Array.isArray(state.connection.authenticated)) state.connection.authenticated = { openai: false, qwen: Boolean(state.connection.authenticated) };
+  state.savedAssets.forEach((asset) => { if (seedSavedAssets.some((sample) => sample.id === asset.id)) { asset.demo = true; if (!asset.tags.includes('演示图 · 非实际生成')) asset.tags.push('演示图 · 非实际生成'); } });
+  state.projects.forEach((project) => { if (['pr-1', 'pr-2'].includes(project.id)) project.type = '演示批次 · 非实际生成'; });
+  state.publicPrompts = Array.isArray(state.publicPrompts) ? state.publicPrompts : structuredClone(PUBLIC_PROMPT_TEMPLATES);
+  state.batchHistory = Array.isArray(state.batchHistory) ? state.batchHistory : [];
+  if (!providerConfig().profiles[state.studio.generationMode]) state.studio.generationMode = 'quality';
 }
 
 function loadLocalState() {
@@ -193,6 +234,15 @@ function loadLocalState() {
 }
 
 async function loadState() {
+  try {
+    const db = await stateDatabase();
+    const saved = await new Promise((resolve, reject) => {
+      const request = db.transaction('state').objectStore('state').get('current');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    if (saved && (saved.updatedAtMs || 0) >= (state.updatedAtMs || 0)) applySavedState(saved);
+  } catch { /* small-state fallback remains available */ }
   try {
     const response = await fetch('/api/state', { cache: 'no-store' });
     if (response.ok && response.headers.get('content-type')?.includes('application/json')) applySavedState(await response.json());
@@ -209,10 +259,12 @@ async function loadState() {
 }
 
 function saveState() {
+  state.updatedAtMs = Date.now();
   try { localStorage.setItem('designflow-state', JSON.stringify(state)); } catch { /* private mode may reject */ }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try { await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) }); } catch { /* local app remains functional */ }
+    try { await persistDurableState(structuredClone(state)); }
+    catch { if (!storageWarningShown) { storageWarningShown = true; showToast('浏览器图片保存失败', '请及时下载图片；当前浏览器可能限制存储或空间不足。', 'info'); } }
   }, 180);
 }
 
@@ -245,8 +297,8 @@ function selectedProducts() { return state.studio.selectedProductIds.map(product
 function selectedOptions(group) { return group.options.filter((option) => option.selected && option.quantity > 0); }
 function groupFactor(group) { return group.enabled ? selectedOptions(group).reduce((sum, option) => sum + option.quantity, 0) : 1; }
 function enabledGroups() { return state.promptGroups.filter((group) => group.enabled && groupFactor(group) > 0); }
-function plannedTotal() { const products = selectedProducts().length; return products ? enabledGroups().reduce((total, group) => total * groupFactor(group), products) : 0; }
-function formulaText() { return [`${selectedProducts().length} 个产品`, ...enabledGroups().map((group) => `${groupFactor(group)} 个${group.name}`)].join(' × ') + ` = ${plannedTotal()} 张素材`; }
+function plannedTotal() { if (comparisonRequested) return selectedProducts().length ? Object.keys(providerConfig().profiles).length : 0; const products = selectedProducts().length; return products ? enabledGroups().reduce((total, group) => total * groupFactor(group), products) : 0; }
+function formulaText() { if (comparisonRequested) return `首个 SKU × 首个组合 × ${plannedTotal()} 个模型配置 = ${plannedTotal()} 张对比图`; return [`${selectedProducts().length} 个产品`, ...enabledGroups().map((group) => `${groupFactor(group)} 个${group.name}`)].join(' × ') + ` = ${plannedTotal()} 张素材`; }
 function batchCost() { return plannedTotal() * CREDIT_PER_IMAGE; }
 function generationProfile(mode = state.studio.generationMode, provider = state.studio.provider) { const profiles = providerConfig(provider).profiles; return profiles[mode] || profiles.fast; }
 function batchGenerationProfile() { return generationProfile(state.batch.generationMode || state.studio.generationMode, state.batch.provider || state.studio.provider); }
@@ -263,7 +315,7 @@ function productAssets(id) { return state.savedAssets.filter((asset) => asset.pr
 function batchReadyCount() { return state.batch.results.filter((item) => item.status === 'ready').length; }
 function batchFailedCount() { return state.batch.results.filter((item) => item.status === 'failed').length; }
 function batchDelayedCount() { return state.batch.results.filter((item) => item.status === 'delayed').length; }
-function batchSettledCount() { return batchReadyCount() + batchFailedCount(); }
+function batchSettledCount() { return batchReadyCount() + batchFailedCount() + batchDelayedCount(); }
 function batchProgress() { return state.batch.results.length ? Math.round((batchSettledCount() / state.batch.results.length) * 100) : 0; }
 function elapsedMinutes(startedAt, finishedAt = 0) { return startedAt ? Math.max(1, Math.ceil(((finishedAt || Date.now()) - startedAt) / 60000)) : 0; }
 function batchStatusLabel() {
@@ -338,9 +390,48 @@ function renderPromptGroups() {
 
 function variantLabel(index) { const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; return index < 26 ? alphabet[index] : `${alphabet[index % 26]}${Math.floor(index / 26) + 1}`; }
 
+function renderPublicPromptArea() {
+  const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
+  return `<div class="public-prompt-area"><label for="public-prompt-template">公共提示词模板</label><select id="public-prompt-template" class="select-control">${state.publicPrompts.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === template.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select><label for="public-prompt-content">模板要求 · 每张图共用</label><textarea id="public-prompt-content" maxlength="800">${escapeHtml(template.prompt)}</textarea><div class="public-prompt-actions"><input id="public-prompt-name" class="input-control" maxlength="40" aria-label="另存模板名称" placeholder="新模板名称"><button class="button button--secondary" data-action="save-public-prompt">另存模板</button></div><label for="design-requirements">补充要求 · 必须在图中出现</label><textarea id="design-requirements" maxlength="800" placeholder="例如：帐篷开口完整可见，后面必须是小木屋。城市地标无需逐个填写。">${escapeHtml(state.studio.requirements)}</textarea><details class="prompt-preview"><summary>预览首张图的实际提示词</summary><pre>${escapeHtml(selectedProducts()[0] ? generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails) : '先选择参考产品。')}</pre></details><div class="public-prompt-actions"><button class="button button--secondary" data-action="review-comparison">${svgIcon('layers')}小样模型对比</button><span>同一 SKU、同一组合、同一提示词；确认后才付费生成。</span></div></div>`;
+}
+
+function renderCityPlanner() {
+  const locations = state.promptGroups.find((group) => group.id === 'group-location');
+  return `<div class="city-planner"><label for="city-name">AI 地域背景助手</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" placeholder="只输入城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全…' : '补全并选择城市'}</button></div><p id="city-planner-help">内置城市直接使用地域库；新城市由当前通道的文字 AI 推荐地标、住宅与景观，API 按量计费。推荐未经联网核验，可展开地域细节查看和编辑。</p>${locations ? `<details><summary>查看已选地点的地域细节</summary>${selectedOptions(locations).map((item) => `<div class="result-audit"><label for="region-${escapeHtml(item.id)}">${escapeHtml(item.label)} · 背景规则</label><textarea id="region-${escapeHtml(item.id)}" data-region-prompt="${escapeHtml(item.id)}" maxlength="1600">${escapeHtml(item.prompt || item.label)}</textarea></div>`).join('')}</details>` : ''}</div>`;
+}
+
+async function enrichCity(label) {
+  if (cityPlannerBusy || !label?.trim()) return;
+  const provider = state.studio.provider;
+  let group = state.promptGroups.find((item) => item.id === 'group-location');
+  if (!group) { group = structuredClone(CORE_PROMPT_GROUPS['group-location']); state.promptGroups.push(group); }
+  label = label.trim();
+  let option = group.options.find((item) => item.id === label.toLowerCase() || item.label === label || item.label.includes(label) || item.label.toLowerCase().includes(label.toLowerCase()));
+  if (!option?.prompt || option.prompt === option.label) {
+    if (!getProviderApiKey(provider)) { showToast('先连接模型', '新城市需要文字 AI 补全。输入密钥后再次选择城市即可。', 'info'); openApiKeyDialog(provider, 'check'); return; }
+    cityPlannerBusy = true;
+    render();
+    try {
+      const output = await apiJson(`/api/${provider}/plan-city`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city: label }) });
+      option = { id: uid('city'), label, prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验', selected: true, quantity: 1 };
+      group.options.push(option);
+    } catch (error) { showToast('城市补全失败', `${error.message}。已保留原有地域选项。`, 'info'); return; }
+    finally { cityPlannerBusy = false; render(); }
+  }
+  group.enabled = true;
+  group.options.forEach((item) => { item.selected = item.id === option.id; });
+  saveState(); render();
+  showToast('当地背景已准备', `${option.label} 的建筑与景观规则已加入配方，可展开查看。`, 'check');
+}
+
+function renderBatchTools() {
+  return `<div class="batch-tools"><p>当前结果：${batchReadyCount()} 张完成 · ${batchFailedCount()} 张失败 · ${batchDelayedCount()} 张待查询。点击图片放大检查；演示图不是实际生成结果。</p>${state.batchHistory.length ? `<label for="batch-history">历史实际批次</label><select id="batch-history" class="select-control"><option value="">选择历史批次</option>${state.batchHistory.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.id)} · ${batch.results.length} 张 · ${escapeHtml(batch.startedAt)}</option>`).join('')}</select>` : ''}<details><summary>本批次模型、提示词与需求验收</summary>${state.batch.results.map((item, index) => `<div class="result-audit"><strong>${variantLabel(index)} · ${escapeHtml(item.productSnapshot?.sku || productById(item.productId)?.sku)} · ${escapeHtml(item.model || item.generationMode || '旧批次')}</strong><p>${escapeHtml(item.tags.join(' · '))}</p>${item.status === 'ready' ? `<label>需求符合度<select class="select-control" data-result-review="${escapeHtml(item.id)}"><option value="pending" ${!item.review || item.review === 'pending' ? 'selected' : ''}>待检查：结构 / 配色 / 地域 / 必须元素</option><option value="pass" ${item.review === 'pass' ? 'selected' : ''}>符合需求</option><option value="fail" ${item.review === 'fail' ? 'selected' : ''}>不符合需求，需修改或重做</option></select></label>` : ''}<pre>${escapeHtml(item.prompt || '旧批次未保存完整提示词；新批次会记录。')}</pre></div>`).join('')}</details></div>`;
+}
+
 function renderResultGroups() {
   if (!state.batch.results.length) return `<div class="result-empty"><span>${svgIcon('image')}</span><strong>生成结果会按 SKU 分组</strong><p>确认任务后，这里会先出现对应数量的加载卡片。</p></div>`;
-  return selectedProducts().map((product) => {
+  const batchProducts = [...new Set(state.batch.results.map((item) => item.productId))].map((id) => state.batch.results.find((item) => item.productId === id)?.productSnapshot || productById(id)).filter(Boolean);
+  return batchProducts.map((product) => {
     const items = state.batch.results.filter((item) => item.productId === product.id);
     const completed = items.filter((item) => item.status === 'ready').length;
     const failed = items.filter((item) => item.status === 'failed').length;
@@ -349,7 +440,7 @@ function renderResultGroups() {
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error"><strong>${label} 生成失败</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="regenerate-result" data-id="${item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton"><span>${label}</span><small>${item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"></button><span class="result-code">${label}</span><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}"></button><span class="result-code">${label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '符合需求' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions"><button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button><button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button><button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
 }
@@ -369,13 +460,13 @@ function renderStudio() {
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">3</span><div><h3>选择模型服务</h3><p>OpenAI 与千问使用各自独立的临时密钥，可随时切换。</p></div></div><div class="generation-mode-grid provider-option-grid" role="group" aria-label="模型服务">${Object.entries(PROVIDERS).map(([provider, item]) => `<button class="generation-mode-option provider-option ${state.studio.provider === provider ? 'is-selected' : ''}" data-action="set-provider" data-provider="${provider}" aria-pressed="${state.studio.provider === provider}" ${batchRunning ? 'disabled' : ''}><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><span><strong>${item.name}</strong><small>${provider === 'openai' ? 'GPT Image 2 / 2.5 · 官方图像模型' : 'Qwen Image 3.0 / Pro · 阿里云百炼'}</small></span>${state.studio.provider === provider ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">4</span><div><h3>选择成片质量</h3><p>默认使用精细成片；快速草图仅用于先确认构图与方向。</p></div></div><div class="generation-mode-grid" role="group" aria-label="成片质量">${Object.entries(providerConfig().profiles).map(([mode, item]) => `<button class="generation-mode-option ${state.studio.generationMode === mode ? 'is-selected' : ''}" data-action="set-generation-mode" data-mode="${mode}" aria-pressed="${state.studio.generationMode === mode}" ${batchRunning ? 'disabled' : ''}><span class="generation-mode-icon">${svgIcon(mode === 'fast' ? 'clock' : 'sparkles')}</span><span><strong>${item.name}</strong><small>${item.model} · ${item.detail}</small></span>${state.studio.generationMode === mode ? `<span class="mode-check">${svgIcon('check')}</span>` : ''}</button>`).join('')}</div></section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>通用提示词</h3><p>对本批次所有参考图与组合生效。</p></div></div><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">5</span><div><h3>公共提示词区</h3><p>需求先满足，摄影质感再精修。模板可复用和另存；仅保存在当前浏览器。</p></div></div>${renderCityPlanner()}${renderPublicPromptArea()}<label for="universal-prompt">通用摄影标准</label><textarea id="universal-prompt" maxlength="800">${escapeHtml(state.studio.universalPrompt)}</textarea></section>
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div><button class="button button--primary formula-action" data-action="review-batch" ${!total || total > MAX_BATCH_SIZE ? 'disabled' : ''}>${svgIcon('sparkles')}确认并生成</button></div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
     <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    <div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>${activeProvider === 'qwen' ? '千问结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片会在当前标签页显示，请生成后及时下载；'}保存会保留 SKU 与提示词记录。</p></div>` : ''}
+    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片保存在当前浏览器，请及时下载备份；'}保存会保留 SKU 与完整提示词记录。</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -438,9 +529,9 @@ function renderPromptDialog() {
 function renderConfirmDialog() {
   if (!state.ui.confirmBatch) return '';
   const total = plannedTotal();
-  const profile = generationProfile();
+  const profile = comparisonRequested ? { name: '同配方模型配置对比', model: Object.values(providerConfig().profiles).map((item) => item.model).join(' / ') } : generationProfile();
   const provider = providerConfig();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认调用 ${provider.shortName} 生成 ${total} 张素材？</h2><p>系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务；首次使用会先提示输入对应密钥。</p><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${profile.model}</strong></div><div><span>产品</span><strong>${selectedProducts().map((product) => product.sku).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div><p class="confirm-note">实际耗时受模型服务实时负载影响；系统会分批提交，降低请求过快导致失败的概率。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch">${svgIcon('sparkles')}开始生成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">${svgIcon('sparkles')}</div><h2 id="confirm-title">确认调用 ${provider.shortName} 生成 ${total} 张素材？</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}首次使用会先提示输入对应密钥。</p><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div><p class="confirm-note">实际耗时受模型服务实时负载影响；同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-batch" ${generationStarting ? 'disabled' : ''}>${svgIcon('sparkles')}开始生成</button></div></section></div>`;
 }
 
 function renderApiKeyDialog() {
@@ -472,6 +563,7 @@ function render() {
 function rememberFocus() { lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
 function focusOverlay() { requestAnimationFrame(() => $('.overlay-panel .overlay-close, .overlay-panel button, .overlay-panel input')?.focus()); }
 function closeOverlay() {
+  comparisonRequested = false;
   imagePreview = null;
   keyDialogOpen = false;
   keyDialogError = '';
@@ -619,11 +711,16 @@ function openApiKeyDialog(provider = state.studio.provider, action = '') {
 }
 
 function generationPrompt(product, tags, promptDetails = []) {
-  const combination = (promptDetails.length ? promptDetails : tags).map((tag) => tag.replace('：', '要求为')).join('；');
+  const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
+  const rules = template?.id === 'white' || template?.backgroundMode === 'none' ? (promptDetails.length ? promptDetails : tags).filter((tag) => !tag.startsWith('当地背景：')) : (promptDetails.length ? promptDetails : tags);
+  const combination = rules.map((tag) => tag.replace('：', '要求为')).join('；');
   return [
     '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
     `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
     '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
+    `场景任务：${template?.prompt || ''}`,
+    state.studio.requirements ? `必须落实的补充要求（高于模板备选项）：${state.studio.requirements}` : '',
+    '验收优先级：产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
     combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料。` : '',
     state.studio.universalPrompt,
     '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
@@ -670,15 +767,16 @@ async function referenceImageForModel(product) {
 }
 
 async function submitQwenResult(result) {
-  const product = productById(result.productId);
+  const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
   const referenceImage = await referenceImageForModel(product);
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.taskId = task.taskId;
+  result.model = task.model;
   result.status = 'loading';
   result.submittedAt = Date.now();
   result.remoteStatus = task.taskStatus || 'PENDING';
@@ -686,17 +784,22 @@ async function submitQwenResult(result) {
 }
 
 async function submitOpenAiResult(result) {
-  const product = productById(result.productId);
+  const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
   const referenceImage = await referenceImageForModel(product);
+  result.status = 'loading';
+  result.submittedAt = Date.now();
+  result.remoteStatus = 'RUNNING';
+  saveState(); render();
   const output = await apiJson('/api/openai/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.image = output.imageUrl;
+  result.model = output.model;
   result.status = 'ready';
-  result.submittedAt = Date.now();
+  result.completedAt = Date.now();
   result.remoteStatus = 'SUCCEEDED';
   result.error = '';
 }
@@ -794,6 +897,9 @@ function finishBatch(batchId) {
 }
 
 async function startBatchGeneration() {
+  if (generationStarting || state.batch.status === 'generating' || activeGenerationId) return;
+  generationStarting = true;
+  try {
   const total = plannedTotal();
   if (!total || total > MAX_BATCH_SIZE) return;
   const cost = batchCost();
@@ -803,11 +909,16 @@ async function startBatchGeneration() {
   const authorized = await checkProviderAuthorization(provider, false);
   if (!authorized) { openApiKeyDialog(provider, 'generate'); keyDialogError = '密钥无效、无模型权限或 API 额度不可用，请检查后重新输入。'; render(); return; }
   clearInterval(generationTimer);
-  const combinations = buildCombinations();
+  const isComparison = comparisonRequested;
+  const combinations = isComparison ? buildCombinations().slice(0, 1) : buildCombinations();
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
-  const results = selectedProducts().flatMap((product, productIndex) => combinations.map((combo, comboIndex) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, image: '', tags: combo.tags, promptDetails: combo.promptDetails, provider, generationMode, status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false })));
+  const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
+  const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
+  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, productSnapshot: structuredClone(product), prompt: generationPrompt(product, combo.tags, combo.promptDetails), ratio: state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false }))));
+  if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
+  comparisonRequested = false;
   state.credits -= cost;
-  state.batch = { id: `B-${String(Date.now()).slice(-6)}`, status: 'generating', provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
+  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   saveState(); render();
@@ -816,9 +927,11 @@ async function startBatchGeneration() {
     await submitQwenBatch(results, state.batch.id);
     if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
   }
+  } finally { generationStarting = false; }
 }
 
 async function regenerateResult(id) {
+  if (activeGenerationId || state.batch.status === 'generating') return;
   const item = state.batch.results.find((result) => result.id === id);
   if (!item || item.status === 'loading' || item.status === 'queued') return;
   if (state.credits < CREDIT_PER_IMAGE) { showToast('积分不足', '无法重新生成当前素材。', 'database'); return; }
@@ -827,7 +940,10 @@ async function regenerateResult(id) {
   const authorized = await checkProviderAuthorization(provider, false);
   if (!authorized) { openApiKeyDialog(provider, `regenerate:${id}`); keyDialogError = '密钥无效、无模型权限或 API 额度不可用，请检查后重新输入。'; render(); return; }
   state.credits -= CREDIT_PER_IMAGE;
-  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false;
+  item.previousAttempts ||= [];
+  item.previousAttempts.push({ prompt: item.prompt, model: item.model, review: item.review, error: item.error });
+  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false; item.review = 'pending';
+  item.prompt = generationPrompt(item.productSnapshot || productById(item.productId), item.tags.filter((tag) => !tag.startsWith('模型：')), item.promptDetails);
   state.batch.provider = provider;
   activeGenerationId = state.batch.id;
   saveState(); render();
@@ -865,8 +981,8 @@ async function checkExistingResult(id) {
 async function resumePendingBatch() {
   if (state.batch.status !== 'generating') return;
   state.batch.startedAtMs ||= Date.now();
-  const interrupted = state.batch.results.filter((item) => item.status === 'queued' && !item.taskId);
-  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在任务提交期间中断，请重新生成此图片。'; });
+  const interrupted = state.batch.results.filter((item) => ['queued', 'loading'].includes(item.status) && !item.taskId);
+  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在请求期间中断，未取得可查询任务编号。原请求可能已计费；请先检查平台记录，再决定是否重新生成。'; });
   const pending = state.batch.results.filter((item) => item.status === 'loading' && item.taskId);
   if (!pending.length) {
     state.batch.finishedAtMs ||= Date.now();
@@ -890,12 +1006,13 @@ async function resumePendingBatch() {
 }
 
 function saveBatch() {
+  if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后归档，已完成的单张图片可先下载。', 'info'); return; }
   const unsaved = state.batch.results.filter((item) => item.status === 'ready' && !item.saved);
   if (!unsaved.length) { showToast('没有待保存素材', '当前批次已经保存或仍在生成。', 'info'); return; }
-  unsaved.forEach((result) => { state.savedAssets.unshift({ id: uid('asset'), productId: result.productId, image: result.image, tags: result.tags.map((tag) => tag.split('：')[1] || tag), batchId: state.batch.id, createdAt: '刚刚' }); result.saved = true; });
+  unsaved.forEach((result) => { state.savedAssets.unshift({ id: uid('asset'), productId: result.productId, image: result.image, tags: result.tags.map((tag) => tag.split('：')[1] || tag), prompt: result.prompt, model: result.model, review: result.review, demo: false, batchId: state.batch.id, createdAt: '刚刚' }); result.saved = true; });
   new Set(unsaved.map((item) => item.productId)).forEach((productId) => { const product = productById(productId); if (product) { product.references = productAssets(productId).length; product.versions += 1; product.status = '已有素材'; product.updated = '刚刚'; } });
   state.batch.status = 'saved'; state.batch.savedAt = nowLabel();
-  state.projects.unshift({ id: uid('project'), name: `${selectedProducts().length} 个 SKU 批量素材`, type: '批量创作', image: state.batch.results.find((item) => item.status === 'ready')?.image || RESULT_IMAGES[0], updated: '刚刚' });
+  state.projects.unshift({ id: uid('project'), name: `${new Set(state.batch.results.map((item) => item.productId)).size} 个 SKU 批量素材`, type: '批量创作', image: state.batch.results.find((item) => item.status === 'ready')?.image || RESULT_IMAGES[0], updated: '刚刚' });
   saveState(); render(); showToast('素材已归档', `${unsaved.length} 张图片已回写到对应 SKU。`, 'folder');
 }
 
@@ -912,6 +1029,18 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const action = button.dataset.action;
+  if (action === 'plan-city') { await enrichCity($('#city-name')?.value.trim()); return; }
+  if (action === 'save-public-prompt') {
+    const name = $('#public-prompt-name')?.value.trim();
+    if (!name) { $('#public-prompt-name')?.focus(); return; }
+    const source = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
+    const template = { ...source, id: uid('public'), name, prompt: $('#public-prompt-content').value };
+    state.publicPrompts.push(template); state.studio.publicPromptId = template.id; saveState(); render(); return;
+  }
+  if (action === 'review-comparison') {
+    if (state.batch.status === 'generating') return;
+    comparisonRequested = true; state.ui.confirmBatch = true; rememberFocus(); render(); focusOverlay(); return;
+  }
   if (action === 'close-overlay' && event.target !== button && button.classList.contains('drawer-backdrop')) return;
   if (action === 'close-image-preview' && event.target !== button && button.classList.contains('image-preview-backdrop')) return;
   if (action === 'open-import') openImport();
@@ -936,7 +1065,6 @@ document.addEventListener('click', async (event) => {
   if (action === 'finish-product-picker') { closeOverlay(); setRoute('studio'); }
   if (action === 'remove-selected-product') {
     state.studio.selectedProductIds = state.studio.selectedProductIds.filter((id) => id !== button.dataset.id);
-    state.batch = { ...seedState.batch, plannedTotal: plannedTotal() };
     saveState(); render();
   }
   if (action === 'open-prompt-library') { rememberFocus(); state.ui.promptDialogGroupId = 'library'; render(); focusOverlay(); }
@@ -967,6 +1095,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'add-prompt-option') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const input = $('#new-option-label'); const label = input?.value.trim();
+    if (group?.id === 'group-location' && label) { await enrichCity(label); return; }
     if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); saveState(); render(); focusOverlay(); } else input?.focus();
   }
   if (action === 'finish-prompt-editor') closeOverlay();
@@ -974,6 +1103,7 @@ document.addEventListener('click', async (event) => {
     const provider = button.dataset.provider;
     if (PROVIDERS[provider] && state.batch.status !== 'generating') {
       state.studio.provider = provider;
+      if (!PROVIDERS[provider].profiles[state.studio.generationMode]) state.studio.generationMode = 'quality';
       state.studio.model = generationProfile(state.studio.generationMode, provider).code;
       saveState(); render();
       showToast('生成通道已切换', `接下来将使用 ${providerConfig(provider).name}。`, 'check');
@@ -988,13 +1118,15 @@ document.addEventListener('click', async (event) => {
     }
   }
   if (action === 'review-batch') {
+    if (state.batch.status === 'generating') return;
+    comparisonRequested = false;
     if (!selectedProducts().length) { showToast('请先选择产品', '至少选择一个 SKU 才能开始生成。', 'box'); return; }
     rememberFocus(); state.ui.confirmBatch = true; render(); focusOverlay();
   }
   if (action === 'confirm-batch') await startBatchGeneration();
   if (action === 'regenerate-result') await regenerateResult(button.dataset.id);
   if (action === 'check-result') await checkExistingResult(button.dataset.id);
-  if (action === 'delete-result') { state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
+  if (action === 'delete-result') { if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后删除结果。', 'info'); return; } state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
   if (action === 'save-batch') saveBatch();
   if (action === 'use-template') { state.studio.templateId = button.dataset.id; setRoute('studio'); showToast('模板已加载', '提示词结构和输出规格已准备好。', 'grid'); }
   if (action === 'download-asset') downloadImage(button.dataset.image, button.dataset.name);
@@ -1044,6 +1176,9 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); } }
+  if (event.target.id === 'design-requirements') { state.studio.requirements = event.target.value; saveState(); }
+  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); }
   if (event.target.id === 'universal-prompt') { state.studio.universalPrompt = event.target.value; saveState(); }
   if (event.target.id === 'product-search') {
     state.ui.productSearch = event.target.value;
@@ -1053,7 +1188,20 @@ document.addEventListener('input', (event) => {
   }
 });
 
+document.addEventListener('toggle', (event) => {
+  if (event.target.matches?.('.prompt-preview') && event.target.open && selectedProducts()[0]) {
+    const combo = buildCombinations()[0];
+    $('pre', event.target).textContent = generationPrompt(selectedProducts()[0], combo.tags, combo.promptDetails);
+  }
+}, true);
+
 document.addEventListener('change', (event) => {
+  if (event.target.id === 'public-prompt-template') { state.studio.publicPromptId = event.target.value; saveState(); render(); }
+  if (event.target.dataset.resultReview) { const item = state.batch.results.find((result) => result.id === event.target.dataset.resultReview); if (item) { item.review = event.target.value; saveState(); } }
+  if (event.target.id === 'batch-history' && event.target.value && state.batch.status !== 'generating') {
+    const index = state.batchHistory.findIndex((batch) => batch.id === event.target.value);
+    if (index >= 0) { const chosen = state.batchHistory.splice(index, 1)[0]; if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch)); state.batch = chosen; saveState(); render(); }
+  }
   if (event.target.id === 'category-filter') { state.ui.productCategory = event.target.value; render(); saveState(); }
   if (event.target.id === 'asset-filter') { state.ui.assetFilter = event.target.value; render(); }
   if (event.target.id === 'product-image') {

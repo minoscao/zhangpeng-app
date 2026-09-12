@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+
+const listeners = {};
+const element = { addEventListener() {}, classList: { toggle() {}, remove() {} }, querySelectorAll: () => [], focus() {}, innerHTML: '', hidden: true };
+const document = { querySelector: () => element, querySelectorAll: () => [], addEventListener: (type, fn) => { listeners[type] = fn; }, body: element };
+const context = vm.createContext({ document, structuredClone, console, URL, Intl, Date, Math, setTimeout, clearTimeout, clearInterval, Headers, Request, Response, location: { origin: 'https://app.example', hash: '' }, sessionStorage: { getItem: () => 'sk-test-studio-1234567890' }, localStorage: { getItem: () => null, setItem() {} }, requestAnimationFrame: (fn) => fn(), history: { replaceState() {} } });
+const source = readFileSync(new URL('../app/app-v2.js', import.meta.url), 'utf8').replace(/\(async function init\(\)[\s\S]*$/, '');
+vm.runInContext(source, context);
+vm.runInContext('render = () => {}; saveState = () => {}; showToast = () => {}; checkProviderAuthorization = async () => true;', context);
+const run = (code) => vm.runInContext(code, context);
+
+assert.equal(run('plannedTotal()'), 18);
+await run("enrichCity('墨尔本')");
+assert.equal(run('plannedTotal()'), 6);
+assert.match(run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)'), /Flinders Street Station/);
+run("state.studio.publicPromptId = 'white'");
+assert.doesNotMatch(run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)'), /Flinders Street Station/);
+run("state.studio.publicPromptId = 'cabin'; state.studio.requirements = '后面必须有小木屋'; state.studio.provider = 'qwen'; comparisonRequested = true;");
+assert.equal(run('plannedTotal()'), 3);
+run('state.ui.confirmBatch = true');
+assert.match(run('renderConfirmDialog()'), /Wan 2.6 Image/);
+assert.doesNotMatch(run('renderConfirmDialog()'), /TENT-2P-014/);
+run('submitQwenBatch = async (results) => { state.studio.requirements = "中途改变的要求"; results.forEach((item) => { item.status = "ready"; item.image = "data:image/jpeg;base64,aW1hZ2U="; }); }; pollQwenBatch = async () => { activeGenerationId = ""; state.batch.status = "ready"; };');
+await run('startBatchGeneration()');
+assert.equal(run('state.batch.results.length'), 3);
+assert.equal(run('new Set(state.batch.results.map((item) => item.prompt)).size'), 1);
+assert.match(run('state.batch.results[0].prompt'), /后面必须有小木屋/);
+assert.doesNotMatch(run('state.batch.results[0].prompt'), /中途改变的要求/);
+assert.equal(run('new Set(state.batch.results.map((item) => item.model)).size'), 3);
+run('state.studio.selectedProductIds = [];');
+assert.match(run('renderResultGroups()'), /result-preview-trigger/);
+assert.match(run('renderResultGroups()'), /TENT-3P-001/);
+run('saveBatch()');
+assert.equal(run('state.savedAssets[0].prompt'), run('state.batch.results[0].prompt'));
+assert.equal(run('state.savedAssets[0].demo'), false);
+
+run("state.studio.selectedProductIds = ['p-4']; comparisonRequested = false;");
+await run('startBatchGeneration()');
+assert.equal(run('state.batchHistory.length'), 1);
+assert.equal(run('state.batchHistory[0].results.length'), 3);
+run('state.batch.status = "generating"; state.batch.results = [{status: "loading", taskId: "", productId: "p-4", tags: []}];');
+await run('resumePendingBatch()');
+assert.equal(run('state.batch.results[0].status'), 'failed');
+assert.match(run('state.batch.results[0].error'), /可能已计费/);
+
+run('state = structuredClone(seedState); state.schemaVersion = 7; state.studio.generationMode = "fast"; applySavedState(structuredClone(state));');
+assert.equal(run('state.schemaVersion'), 8);
+assert.equal(run('state.studio.generationMode'), 'fast');
+assert.equal(run('state.savedAssets.every((asset) => asset.demo)'), true);
+assert.equal(run('state.promptGroups[0].options.some((option) => option.id === "melbourne")'), true);
+run("state.publicPrompts.push({id: 'white-copy', backgroundMode: 'none', prompt: '纯白背景'}); state.studio.publicPromptId = 'white-copy';");
+assert.doesNotMatch(run('generationPrompt(state.products[3], ["当地背景：墨尔本天际线"], [])'), /墨尔本天际线/);
+console.log('Studio prompt, comparison, batch snapshots, history, migration and recovery tests passed.');

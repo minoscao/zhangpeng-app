@@ -32,6 +32,42 @@
   --sidebar: 210px;
 }
 
+/* Requirements-first production tools follow the incumbent workspace grid. */
+.public-prompt-area, .city-planner { display: grid; gap: 12px; margin-bottom: 24px; min-width: 0; }
+.public-prompt-area label, .city-planner label { color: var(--ink-800); font-weight: 700; }
+.public-prompt-area textarea, .city-planner textarea { width: 100%; min-height: 110px; padding: 12px; color: var(--ink-950); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); resize: vertical; }
+.public-prompt-area .select-control, .city-planner .input-control, .batch-tools .select-control { width: 100%; max-width: 100%; min-height: 44px; }
+.public-prompt-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.public-prompt-actions input { flex: 1 1 180px; min-width: 0; }
+.public-prompt-actions span, .city-planner p, .batch-tools p { margin: 0; color: var(--ink-600); font-size: 13px; overflow-wrap: anywhere; }
+.public-prompt-actions .button { min-height: 44px; }
+.prompt-preview summary, .city-planner summary, .batch-tools summary { cursor: pointer; padding-block: 12px; color: var(--purple-800); font-weight: 700; }
+.prompt-preview pre, .result-audit pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; color: var(--ink-800); max-height: 320px; overflow: auto; }
+.result-audit { padding-block: 12px; border-bottom: 1px solid var(--line); min-width: 0; }
+.result-audit strong { overflow-wrap: anywhere; }
+.result-audit label { display: grid; gap: 8px; }
+.batch-tools { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
+.page--batch .result-grid { grid-template-columns: minmax(0, 1fr); }
+.page--batch .result-card img { width: 100%; }
+.result-model { padding: 8px; background: var(--surface); color: var(--ink-800); font-size: 13px; overflow-wrap: anywhere; }
+.page--batch .result-product-group header img { width: 40px; height: 40px; }
+.page--batch .result-preview-trigger img { object-fit: contain; background: var(--surface); }
+.page--batch .result-actions { position: static; min-height: 48px; opacity: 1; background: var(--surface); padding: 8px; }
+.page--batch .result-actions button { width: 44px; height: 44px; border: 1px solid var(--line-strong); }
+.page--batch .result-tags { flex-wrap: wrap; padding: 8px; }
+.page--batch .result-tags span { color: var(--ink-600); font-size: 12px; white-space: normal; }
+.page--batch .result-product-group header strong { font-size: 13px; }
+.page--batch .result-product-group header small, .page--batch .result-skeleton small { font-size: 12px; color: var(--ink-600); }
+.page--batch .result-error { aspect-ratio: auto; min-height: 170px; }
+.page--batch .result-error strong { font-size: 14px; }
+.page--batch .result-error button { font-size: 13px; min-height: 44px; }
+.page--batch .result-error p { font-size: 13px; display: block; overflow: visible; }
+.page--batch .result-error p { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .public-prompt-area textarea, .public-prompt-area select, .public-prompt-actions input { font-size: 16px; }
+  .public-prompt-actions .button { flex: 1 1 auto; }
+}
+
 * { box-sizing: border-box; }
 html { min-width: 320px; background: var(--canvas); }
 body { margin: 0; min-height: 100vh; color: var(--ink-950); background: var(--canvas); font-family: Aptos, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
