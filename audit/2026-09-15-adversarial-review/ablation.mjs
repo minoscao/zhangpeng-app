@@ -88,9 +88,14 @@ run("state.promptGroups.find((group) => group.id === 'group-location').enabled =
 const promptWithoutLocation = run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
 record(
   'A3',
-  '启用当地背景应把可识别地域线索加入最终提示词',
-  promptWithLocation !== promptWithoutLocation && /悉尼歌剧院|海港大桥/.test(promptWithLocation) && !/悉尼歌剧院|海港大桥/.test(promptWithoutLocation),
-  `changed=${promptWithLocation !== promptWithoutLocation}; landmark_on=${/悉尼歌剧院|海港大桥/.test(promptWithLocation)}; landmark_off=${/悉尼歌剧院|海港大桥/.test(promptWithoutLocation)}`,
+  '启用当地背景应前置可验收的地域硬约束，并明确替换参考图白底',
+  promptWithLocation !== promptWithoutLocation
+    && /【地域场景硬约束｜不可省略】/.test(promptWithLocation)
+    && /必须彻底移除参考图原有的白底/.test(promptWithLocation)
+    && /悉尼歌剧院|海港大桥/.test(promptWithLocation)
+    && promptWithLocation.indexOf('【地域场景硬约束｜不可省略】') < promptWithLocation.indexOf('场景任务：')
+    && !/悉尼歌剧院|海港大桥|地域场景硬约束/.test(promptWithoutLocation),
+  `changed=${promptWithLocation !== promptWithoutLocation}; hard_constraint=${/【地域场景硬约束｜不可省略】/.test(promptWithLocation)}; removes_reference_background=${/必须彻底移除参考图原有的白底/.test(promptWithLocation)}; before_scene=${promptWithLocation.indexOf('【地域场景硬约束｜不可省略】') < promptWithLocation.indexOf('场景任务：')}; landmark_off=${!/悉尼歌剧院|海港大桥/.test(promptWithoutLocation)}`,
 );
 
 // A4 — Shot choices should encode mutually exclusive framing constraints.

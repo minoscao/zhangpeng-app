@@ -21,9 +21,16 @@ assert.equal(run('plannedTotal()'), 24);
 assert.equal(run('state.promptGroups[0].options.filter((option) => option.id === "melbourne").length'), 1);
 run('state.promptGroups[0].options.forEach((option) => { option.selected = option.id === "melbourne"; });');
 assert.equal(run('plannedTotal()'), 6);
-assert.match(run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)'), /Flinders Street Station/);
+const melbournePrompt = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
+assert.match(melbournePrompt, /【地域场景硬约束｜不可省略】/);
+assert.match(melbournePrompt, /必须彻底移除参考图原有的白底/);
+assert.match(melbournePrompt, /Flinders Street Station/);
+assert.match(melbournePrompt, /背景环境占画面 40%–55%/);
+assert.ok(melbournePrompt.indexOf('【地域场景硬约束｜不可省略】') < melbournePrompt.indexOf('场景任务：'));
+assert.equal((melbournePrompt.match(/目标地域：/g) || []).length, 1);
 run("state.studio.publicPromptId = 'white'");
-assert.doesNotMatch(run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)'), /Flinders Street Station/);
+const whitePromptWithoutLocation = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
+assert.doesNotMatch(whitePromptWithoutLocation, /Flinders Street Station|地域场景硬约束/);
 run("state.studio.publicPromptId = 'cabin'; state.studio.requirements = '后面必须有小木屋'; state.studio.provider = 'qwen'; comparisonRequested = true;");
 assert.equal(run('plannedTotal()'), 3);
 run('state.ui.confirmBatch = true');
@@ -66,7 +73,7 @@ assert.equal(run('state.batch.results[0].status'), 'failed');
 assert.match(run('state.batch.results[0].error'), /可能已计费/);
 
 run('state = structuredClone(seedState); state.schemaVersion = 7; state.studio.generationMode = "fast"; applySavedState(structuredClone(state));');
-assert.equal(run('state.schemaVersion'), 10);
+assert.equal(run('state.schemaVersion'), 11);
 assert.equal(run('state.studio.generationMode'), 'fast');
 assert.equal(run('state.savedAssets.every((asset) => asset.demo)'), true);
 assert.equal(run('state.promptGroups[0].options.some((option) => option.id === "melbourne")'), true);
@@ -336,14 +343,14 @@ assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-can
 assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-shot").options.map((option) => option.label)'), ['近景', '中景', '远景']);
 assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-shot").options.map((option) => option.description)'), ['帐篷占 80%–95% · 产品细节主导', '帐篷占 45%–60% · 产品环境平衡', '帐篷占 12%–25% · 地域环境主导']);
 for (const [shotId, requiredPatterns] of [
-  ['shot-close', [/最高构图优先级/, /1–2 米/, /65–85mm/, /80%–95%/, /环境只占 5%–20%/, /不要中景或广角全景/]],
-  ['shot-medium', [/最高构图优先级/, /3–5 米/, /45–55mm/, /45%–60%/, /不要近景裁切或远景全景/]],
-  ['shot-wide', [/最高构图优先级/, /10–20 米/, /24–35mm/, /12%–25%/, /环境占 75%–88%/, /严禁返回近景或常规中景/]],
+  ['shot-close', [/镜头景别硬性约束/, /1–2 米/, /65–85mm/, /80%–95%/, /环境只占 5%–20%/, /不要中景或广角全景/]],
+  ['shot-medium', [/镜头景别硬性约束/, /3–5 米/, /45–55mm/, /45%–60%/, /不要近景裁切或远景全景/]],
+  ['shot-wide', [/镜头景别硬性约束/, /10–20 米/, /24–35mm/, /12%–25%/, /环境占 75%–88%/, /严禁返回近景或常规中景/]],
 ]) {
   run("state.promptGroups.find((group) => group.id === 'group-shot').options.forEach((option) => { option.selected = option.id === '" + shotId + "'; });");
   const shotPrompt = run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)');
   for (const pattern of requiredPatterns) assert.match(shotPrompt, pattern, shotId + ': ' + pattern);
-  assert.match(shotPrompt, /优先级：镜头景别与画布构图/);
+  assert.match(shotPrompt, /冲突优先级：帐篷结构与地域场景硬约束 > 镜头景别与画布构图/);
   if (shotId === 'shot-wide') assert.match(shotPrompt, /环境必须主导画面面积，禁止为了突出产品而放大成中景/);
 }
 assert.match(run('renderPromptGroups()'), /远景 · 帐篷占 12%–25%/);
@@ -375,10 +382,13 @@ assert.equal(run('state.credits'), creditsBefore4K);
 await run(`generate4KResult(${JSON.stringify(sourceResultId)})`);
 assert.equal(run('state.batch.results.length'), 19);
 run("const savedV8 = structuredClone(seedState); savedV8.schemaVersion = 8; savedV8.promptGroups = savedV8.promptGroups.filter((group) => !['group-canvas', 'group-shot'].includes(group.id)); applySavedState(savedV8);");
-assert.equal(run('state.schemaVersion'), 10);
+assert.equal(run('state.schemaVersion'), 11);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-canvas")'), true);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-shot")'), true);
 run("const savedV9 = structuredClone(seedState); savedV9.schemaVersion = 9; savedV9.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt = '旧版远景提示词'; applySavedState(savedV9);");
-assert.equal(run('state.schemaVersion'), 10);
+assert.equal(run('state.schemaVersion'), 11);
 assert.match(run("state.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt"), /12%–25%/);
+run("const savedV10 = structuredClone(seedState); savedV10.schemaVersion = 10; savedV10.promptGroups.find((group) => group.id === 'group-location').options.find((option) => option.id === 'sydney').prompt = '旧版泛化悉尼背景'; applySavedState(savedV10);");
+assert.equal(run('state.schemaVersion'), 11);
+assert.match(run("state.promptGroups.find((group) => group.id === 'group-location').options.find((option) => option.id === 'sydney').prompt"), /Sydney Opera House/);
 console.log('Studio canvas sizes, camera shots, 4K queue, other requirements and prompt confirmation tests passed.');

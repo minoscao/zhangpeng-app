@@ -44,9 +44,9 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const PUBLIC_PROMPT_TEMPLATES = [
-  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和补充要求；不能用漂亮但无关的背景代替指定环境。要求的背景元素必须看得清，不可用过度虚化隐藏。' },
+  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
   { id: 'cabin', name: '木屋自然庭院', prompt: '帐篷位于开阔自然庭院，后方必须有清楚可辨的真实小木屋、木质立面和自然植被。采用所选地区的住宅与景观风格，不要求城市地标；地域规则中的天际线是备选，不得替代本模板指定的小木屋。' },
   { id: 'family', name: '亲子生活摄影', prompt: '儿童在帐篷旁自然玩耍，帐篷关键开口与支架完整可见。必须落实所选城市背景与产品面料配色，人物不抢产品主体，生活动作真实而非摆拍。' },
@@ -115,13 +115,13 @@ const CORE_PROMPT_GROUPS = Object.freeze({
   'group-location': Object.freeze({
     id: 'group-location', name: '当地背景', enabled: true,
     options: Object.freeze([
-      Object.freeze({ id: 'melbourne', label: '澳大利亚·墨尔本', description: '雅拉河水岸、墨尔本天际线或维州木屋庭院', prompt: '地点为澳大利亚墨尔本 Melbourne：城市方案采用雅拉河 Yarra River 水岸公园视角，远景清晰可辨墨尔本 CBD 天际线及弗林德斯街车站 Flinders Street Station 的黄赭色立面与绿色穹顶轮廓；木屋方案采用维多利亚州近郊木质小屋和开阔草坪庭院。根据公共模板选择城市或木屋方案，不混拼不相关城市地标，不把墨尔本写成悉尼，不用普通无地域背景替代。背景元素必须可见但不得遮挡帐篷', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '海港地标、海滨公园与明亮自然光', prompt: '采用澳大利亚悉尼的高端户外生活背景，从悉尼歌剧院轮廓、海港大桥、海滨公园或当地明亮现代住宅中选择一至两项自然融入远景；保持真实空间关系和当地清透日光，地标只作为可识别的环境线索，不遮挡或抢过帐篷主体，避免旅游明信片感和生硬拼贴', selected: true, quantity: 1 }),
-      Object.freeze({ id: 'dubai', label: '阿联酋·迪拜', description: '现代天际线、沙漠庭院与棕榈绿洲', prompt: '采用阿联酋迪拜的高端家庭户外背景，从现代天际线、沙漠庭院、浅色石材建筑或棕榈绿洲中选择一至两项自然融入环境；使用当地温暖阳光和克制奢华的空间语言，背景真实大气但不抢帐篷主体，避免夸张地标堆砌', selected: true, quantity: 2 }),
-      Object.freeze({ id: 'suzhou', label: '中国·苏州', description: '现代江南庭院、白墙黛瓦与水岸绿意', prompt: '采用中国苏州的现代江南家庭背景，从白墙黛瓦、当代庭院、水岸绿意或园林窗景中选择一至两项自然融入远景；光线柔和通透，传统线索克制现代，保持真实住宅尺度，不做古装影楼或旅游景点式布景', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'california', label: '美国·加利福尼亚', description: '开阔后院、阳光木屋与松弛家庭生活', prompt: '采用美国加利福尼亚的高端家庭户外背景，呈现开阔草坪后院、浅色木屋、棕榈或耐旱景观中的一至两项；使用充足自然日光和松弛真实的家庭生活氛围，空间开阔，帐篷仍是唯一视觉主体', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'london', label: '英国·伦敦', description: '英式花园、联排住宅与柔和天光', prompt: '采用英国伦敦家庭生活背景，将英式后花园、浅砖联排住宅、修剪绿篱或柔和阴天天光自然融入环境；画面优雅克制、真实宜居，地域特征清楚但不过度装饰，不遮挡帐篷产品', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'paris', label: '法国·巴黎', description: '法式花园、浅石立面与优雅生活感', prompt: '采用法国巴黎或近郊的高端家庭背景，将浅色石材立面、法式花园、铁艺窗或克制优雅的城市露台自然融入远景；保持真实摄影和当代生活感，避免埃菲尔铁塔式直白贴图，帐篷始终为核心主体', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'melbourne', label: '澳大利亚·墨尔本', description: '雅拉河水岸、弗林德斯街车站与 CBD', prompt: '地点锁定为澳大利亚墨尔本 Melbourne。必须采用雅拉河 Yarra River 水岸公园视角，并让弗林德斯街车站 Flinders Street Station 黄赭色立面、绿色穹顶和墨尔本 CBD 天际线中的至少一个成为清楚可辨的地域锚点；禁止改成悉尼地标、普通草坪或无名住宅。建筑透视、尺度、日光方向与帐篷所在岸边空间必须真实一致', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '歌剧院、海港大桥与海滨公园', prompt: '地点锁定为澳大利亚悉尼 Sydney。必须采用悉尼海港沿岸开阔公园视角，清楚呈现悉尼歌剧院 Sydney Opera House 的白色帆形屋顶，并同时保留海港大桥 Sydney Harbour Bridge 的钢拱轮廓作为第二识别线索；二者需处于可信的海港空间关系中。禁止用普通现代住宅、无名草坪或其他城市天际线代替', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'dubai', label: '阿联酋·迪拜', description: '哈利法塔、浅色石材与棕榈庭院', prompt: '地点锁定为阿联酋迪拜 Dubai。必须在浅色石材与棕榈组成的开放式家庭庭院或公园中，清楚呈现哈利法塔 Burj Khalifa 独特的逐级收分尖塔轮廓作为地域锚点；使用干燥通透的暖日光和可信城市尺度。禁止只给沙漠、普通豪宅或泛化现代天际线，禁止混入其他海湾城市地标', selected: true, quantity: 2 }),
+      Object.freeze({ id: 'suzhou', label: '中国·苏州', description: '金鸡湖、东方之门与现代江南', prompt: '地点锁定为中国苏州 Suzhou。必须采用金鸡湖 Jinji Lake 岸边开放绿地视角，清楚呈现东方之门 Gate of the Orient 的拱门形轮廓作为现代苏州地域锚点，并以少量白墙黛瓦或江南园林植被补充层次。禁止只用泛化中式庭院、古镇布景或其他城市天际线代替', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'california', label: '美国·加利福尼亚', description: '加州工匠屋、耐旱植物与海岸阳光', prompt: '地点锁定为美国加利福尼亚 California。必须呈现可辨认的加州家庭住宅语言：低坡屋顶的 Craftsman 工匠屋、灰泥或木板立面、龙舌兰等耐旱植物，并保留棕榈与干燥山丘或海岸光线中的至少一项；采用明亮干燥的午后日光。禁止改成普通欧式草坪、英式花园或无地域样板房', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'london', label: '英国·伦敦', description: '塔桥、泰晤士河岸与英式花园', prompt: '地点锁定为英国伦敦 London。必须采用泰晤士河岸开放公园或露台视角，让伦敦塔桥 Tower Bridge 的双塔与蓝色悬索结构成为清楚可辨的地域锚点，并保留浅砖联排住宅、修剪绿篱或柔和阴天天光中的一项。禁止用普通英式花园完全替代塔桥，禁止混入其他欧洲城市地标', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'paris', label: '法国·巴黎', description: '埃菲尔铁塔、浅石立面与法式花园', prompt: '地点锁定为法国巴黎 Paris。必须采用塞纳河岸公园或开阔城市露台视角，让埃菲尔铁塔 Eiffel Tower 的铁格构轮廓成为清楚可辨且透视可信的地域锚点，并保留奥斯曼浅石立面、铁艺栏杆或法式花园中的一项。禁止只用泛化法式住宅代替地标，避免贴纸式地标拼贴和其他城市建筑', selected: false, quantity: 1 }),
     ]),
   }),
   'group-color': Object.freeze({
@@ -166,7 +166,7 @@ const PROVIDERS = Object.freeze({
     name: '阿里千问', shortName: '千问', keyStorage: QWEN_KEY_STORAGE, keyLabel: '千问 API Key', avatar: 'Q',
     profiles: Object.freeze({
       fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 5 }),
-      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '开启深度思考，画质优先', submitLimit: 5, concurrency: 5 }),
+      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '关闭二次改写，优先精确执行地域与产品约束', submitLimit: 5, concurrency: 5 }),
       wan: Object.freeze({ name: '万相 · 产品一致性', model: 'Wan 2.6 Image', code: 'wan2.6-image', detail: '参考图编辑 · 关闭扩写，保留明确需求', submitLimit: 5, concurrency: 2 }),
     }),
   }),
@@ -334,7 +334,7 @@ function saveStylePrompt() {
 }
 
 function applySavedState(saved) {
-  if (![6, 7, 8, 9, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
+  if (![6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
     state.schemaVersion = CURRENT_SCHEMA_VERSION;

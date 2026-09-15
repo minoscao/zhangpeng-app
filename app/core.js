@@ -88,23 +88,49 @@
     return [`${selectedProducts(state).length} 个产品`, ...enabledGroups(state).map((group) => `${groupFactor(group)} 个${group.name}`)].join(' × ') + ` = ${total} 张素材`;
   }
 
+  function ruleValue(rules, name) {
+    return rules.find((rule) => rule.startsWith(`${name}：`))?.replace(new RegExp(`^${name}：`), '') || '';
+  }
+
+  function locationDirective(locationRule, shotRule) {
+    if (!locationRule) return '';
+    const visibility = /环境远景|建立镜头/.test(shotRule)
+      ? '环境占画面 75%–88%，城市地标或地域建筑占画面 25%–45%，轮廓与关键特征清晰可辨。'
+      : /产品近景|近景特写/.test(shotRule)
+        ? '即使是近景，至少保留一个占画面 15% 以上、特征可辨的地域锚点；不得把它虚化成无法识别的色块。'
+        : '背景环境占画面 40%–55%，至少一个城市地标或地域建筑占画面 20%–35%，名称对应的关键特征清晰可辨。';
+    return [
+      '【地域场景硬约束｜不可省略】输入参考图只用于锁定帐篷产品，不代表成片背景；必须彻底移除参考图原有的白底、透明底、摄影棚或旧场景，并重新生成所选地区的真实环境。',
+      `目标地域：${locationRule}。`,
+      `可见性验收：${visibility}`,
+      '不得用普通草坪、无名住宅、纯色背景、摄影棚或无法辨认的背景虚化代替目标地域；不得出现其他城市的地标。若所选使用场景与户外地域冲突，将“儿童房、阅读角”等理解为面向该地标的开放露台或庭院活动区；先删除非必要道具，也不能删除地域锚点。',
+    ].join('\n');
+  }
+
   function compilePrompt(state, product, tags, promptDetails = [], ratio = state.studio.ratio) {
     const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
     const sourceRules = promptDetails.length ? promptDetails : tags;
     const rules = template?.id === 'white' || template?.backgroundMode === 'none'
       ? sourceRules.filter((tag) => !tag.startsWith('当地背景：'))
       : sourceRules;
-    const shotRule = rules.find((rule) => rule.startsWith('镜头景别：'))?.replace(/^镜头景别：/, '') || '';
+    const locationRule = ruleValue(rules, '当地背景');
+    const shotRule = ruleValue(rules, '镜头景别');
     const wideShot = /环境远景|建立镜头/.test(shotRule);
-    const combination = rules.map((tag) => tag.replace('：', '要求为').replace(/[。；\s]+$/, '')).join('；');
+    const combination = rules
+      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('镜头景别：'))
+      .map((tag) => tag.replace('：', '要求为').replace(/[。；\s]+$/, ''))
+      .join('；');
     return [
       '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
       wideShot ? `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面中唯一的商业产品；本张为远景，环境必须主导画面面积，禁止为了突出产品而放大成中景。` : `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
-      shotRule ? `镜头景别硬性约束（最高构图优先级，不得自动折中成中景）：${shotRule}。若占比不符即视为生成失败。` : '',
       '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
+      locationDirective(locationRule, shotRule),
+      shotRule ? `镜头景别硬性约束（不得自动折中成中景）：${shotRule}。若占比不符即视为生成失败。` : '',
       `场景任务：${template?.prompt || ''}`,
-      '优先级：镜头景别与画布构图 > 产品结构与明确需求 > 场景模板 > 地域线索 > 摄影美感。所有“必须”元素都要可辨识。',
-      combination ? `本张创作规则：${combination}。当地背景只提供真实环境线索；产品配色只作用于帐篷面料；视觉风格不能覆盖结构、配色、地标或场景模板。` : '',
+      locationRule
+        ? '冲突优先级：帐篷结构与地域场景硬约束 > 镜头景别与画布构图 > 产品配色和其他明确要求 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。'
+        : '优先级：帐篷结构与明确要求 > 镜头景别与画布构图 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。',
+      combination ? `其余创作规则：${combination}。产品配色只作用于帐篷面料；视觉风格不能覆盖产品结构、${locationRule ? '地域场景硬约束、' : ''}配色或场景模板。` : '',
       `画幅比例：${ratio}。画布方向与构图必须遵循所选尺寸。`,
       state.studio.otherRequirements?.trim() ? `其他要求：\n${state.studio.otherRequirements.trim()}` : '',
       state.studio.universalPrompt,
@@ -177,6 +203,7 @@
     buildCombinations,
     plannedTotal,
     formulaText,
+    locationDirective,
     compilePrompt,
     reviewFingerprint,
     applyTemplate,

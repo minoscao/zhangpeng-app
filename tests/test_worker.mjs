@@ -5,6 +5,7 @@ const apiKey = 'sk-test-openai-1234567890';
 let editRequest;
 let cityRequest;
 let wanRequest;
+const qwenRequests = [];
 
 globalThis.fetch = async (input, init = {}) => {
   const url = String(input);
@@ -28,13 +29,16 @@ globalThis.fetch = async (input, init = {}) => {
     return Response.json({ choices: [{ message: { content: '墨尔本城市背景：雅拉河水岸公园与 CBD 天际线；木屋方案采用维州木质庭院。' } }] });
   }
   if (url.endsWith('/image-generation/generation')) {
-    wanRequest = JSON.parse(init.body);
-    assert.equal(wanRequest.model, 'wan2.6-image');
-    assert.equal(wanRequest.parameters.enable_interleave, false);
-    assert.equal(wanRequest.parameters.prompt_extend, false);
-    assert.equal(wanRequest.parameters.enable_thinking, undefined);
-    assert.equal(wanRequest.parameters.n, 1);
-    return Response.json({ output: { task_id: 'task-test-wan-123', task_status: 'PENDING' } });
+    const request = JSON.parse(init.body);
+    qwenRequests.push(request);
+    if (request.model === 'wan2.6-image') {
+      wanRequest = request;
+      assert.equal(wanRequest.parameters.enable_interleave, false);
+    }
+    assert.equal(request.parameters.prompt_extend, false);
+    assert.equal(request.parameters.enable_thinking, undefined);
+    assert.equal(request.parameters.n, 1);
+    return Response.json({ output: { task_id: 'task-test-qwen-123', task_status: 'PENDING' } });
   }
   throw new Error(`Unexpected upstream request: ${url}`);
 };
@@ -85,5 +89,21 @@ for (const prompt of ['生成真实帐篷产品场景', 'a'.repeat(2001)]) {
   assert.equal(wanResponse.status, prompt.length > 2000 ? 400 : 202);
 }
 assert.ok(wanRequest);
+
+const regionalPrompt = '【地域场景硬约束｜不可省略】必须彻底移除参考图白底，并清楚显示悉尼歌剧院。';
+const qwenQualityResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.equal(qwenQualityResponse.status, 202);
+const qualityRequest = qwenRequests.at(-1);
+assert.equal(qualityRequest.model, 'qwen-image-3.0-pro');
+assert.equal(qualityRequest.parameters.prompt_extend, false);
+assert.equal(qualityRequest.parameters.prompt_extend_mode, undefined);
+assert.equal(qualityRequest.parameters.enable_thinking, undefined);
+assert.match(qualityRequest.parameters.negative_prompt, /参考图白底/);
+assert.match(qualityRequest.parameters.negative_prompt, /错误城市/);
+assert.match(cityRequest.messages[0].content, /只选择一个最有把握/);
 
 console.log('Worker OpenAI integration tests passed.');
