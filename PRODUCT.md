@@ -44,8 +44,8 @@ The workspace treats the SKU and its real product image as the system of record,
 
 - Boss feedback and reference screenshots supplied in the Codex conversation on 2026-09-07.
 - Consolidated requirements: `docs/第二轮老板反馈-修改需求整理-2026-09-07.md`.
-- Existing visual system: `design-system/tentflow-studio/MASTER.md` and page overrides.
-- Existing production implementation: `app/index.html`, `app/styles.css`, and `app/app.js`.
+- Existing visual system: root `DESIGN.md`; page-specific camera rules live in `design-system/tentflow-studio/pages/studio.md`.
+- Existing production implementation: `app/index.html`, `app/styles.css`, `app/core.js`, `app/export.js`, and `app/app-v2.js`.
 
 ## Product Principles
 

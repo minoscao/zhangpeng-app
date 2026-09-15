@@ -32,11 +32,12 @@ class DesignFlowTests(unittest.TestCase):
     def test_public_api_config_never_exposes_key(self):
         config = server.public_api_config()
         self.assertTrue(config["userKeyRequired"])
-        self.assertEqual(config["model"], "qwen-image-3.0-pro")
+        self.assertEqual(config["model"], "gpt-image-2")
+        self.assertTrue(config["localStateWritable"])
         self.assertNotIn("apiKey", json.dumps(config))
 
     def test_required_files_exist(self):
-        for relative in ("app/index.html", "app/styles.css", "app/app-v2.js", "worker.js", "server.py", "start.ps1", "dist/DesignFlow Studio.exe"):
+        for relative in ("app/index.html", "app/styles.css", "app/core.js", "app/export.js", "app/app-v2.js", "worker.js", "server.py", "start.ps1", "tests/test_export.mjs", "dist/DesignFlow Studio.exe"):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_static_markup_accessibility_basics(self):
@@ -52,21 +53,21 @@ class DesignFlowTests(unittest.TestCase):
         self.assertNotIn("http://", html)
 
     def test_public_design_flow_actions_are_present(self):
-        js = (ROOT / "app/app.js").read_text(encoding="utf-8")
+        js = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
         for action in (
-            "new-design",
-            "generate",
-            "design-product",
+            "open-product-picker",
+            "generate-batch",
+            "drawer-generate",
             "use-template",
-            "export-current",
-            "test-connection",
+            "export-assets",
+            "authorize-provider",
             "shutdown-app",
         ):
             self.assertIn(action, js)
 
     def test_public_navigation_separates_products_design_and_templates(self):
         html = (ROOT / "app/index.html").read_text(encoding="utf-8")
-        js = (ROOT / "app/app.js").read_text(encoding="utf-8")
+        js = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
         for route in (
             'data-route="studio"',
             'data-route="products"',
@@ -76,15 +77,15 @@ class DesignFlowTests(unittest.TestCase):
             'data-route="connections"',
         ):
             self.assertIn(route, html)
-        self.assertIn("DesignProject", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("帐篷设计", js)
+        self.assertIn("Recipe", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("儿童帐篷", js)
         self.assertNotIn("全球获客", html)
         self.assertNotIn("WhatsApp", html + js)
 
-    def test_canvas_first_workspace_and_generated_assets_are_present(self):
-        js = (ROOT / "app/app.js").read_text(encoding="utf-8")
+    def test_batch_workspace_and_generated_assets_are_present(self):
+        js = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
         css = (ROOT / "app/styles.css").read_text(encoding="utf-8")
-        for marker in ("studio-layout", "canvas-stage", "source-panel", "settings-panel", "version-strip"):
+        for marker in ("batch-layout", "selected-products", "prompt-group-list", "result-scroll", "quality-rubric"):
             self.assertIn(marker, js + css)
         for relative in (
             "assets/studio/tent-hero.png",
@@ -93,6 +94,7 @@ class DesignFlowTests(unittest.TestCase):
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
         self.assertIn("state.credits -=", js)
+        self.assertIn("refundResultCredit", js)
 
     def test_responsive_and_reduced_motion_rules(self):
         css = (ROOT / "app/styles.css").read_text(encoding="utf-8")
@@ -136,7 +138,7 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIsNone(re.search(r"sk-[A-Za-z0-9]{20,}", worker + client))
 
     def test_prompt_rules_are_product_specific_and_photo_real(self):
-        client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
+        client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8") + (ROOT / "app/core.js").read_text(encoding="utf-8")
         self.assertIn("name: '当地背景'", client)
         self.assertIn("悉尼歌剧院轮廓、海港大桥", client)
         self.assertIn("name: '产品配色'", client)
@@ -144,7 +146,23 @@ class DesignFlowTests(unittest.TestCase):
         self.assertIn("promptDetails", client)
         self.assertIn("generationMode: 'quality'", client)
         self.assertIn("不是插画、3D 渲染、平面示意图", client)
-        self.assertIn("全画幅商业摄影质感", client)
+        self.assertIn("真实全画幅商业摄影", client)
+
+    def test_templates_exports_and_worker_hardening_are_real(self):
+        client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8")
+        core = (ROOT / "app/core.js").read_text(encoding="utf-8")
+        exporter = (ROOT / "app/export.js").read_text(encoding="utf-8")
+        worker = (ROOT / "worker.js").read_text(encoding="utf-8")
+        source = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertIn("applyTemplate", core)
+        self.assertIn("variantDirection", core)
+        self.assertIn("manifest.json", exporter)
+        self.assertIn("application/zip", exporter)
+        self.assertIn("UPSTREAM_TIMEOUTS", worker)
+        self.assertIn("X-Request-Id", worker)
+        self.assertIn("api_error", worker)
+        self.assertIn("_proxy_model_request", source)
+        self.assertIn("DESIGNFLOW_REMOTE_API_BASE", source)
 
     def test_state_roundtrip(self):
         original_dir = server.DATA_DIR

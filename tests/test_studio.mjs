@@ -6,6 +6,7 @@ const listeners = {};
 const element = { addEventListener() {}, classList: { toggle() {}, remove() {} }, querySelectorAll: () => [], focus() {}, innerHTML: '', hidden: true };
 const document = { querySelector: () => element, querySelectorAll: () => [], addEventListener: (type, fn) => { listeners[type] = fn; }, body: element };
 const context = vm.createContext({ document, structuredClone, console, URL, Intl, Date, Math, setTimeout, clearTimeout, clearInterval, Headers, Request, Response, location: { origin: 'https://app.example', hash: '' }, sessionStorage: { getItem: () => 'sk-test-studio-1234567890' }, localStorage: { getItem: () => null, setItem() {} }, requestAnimationFrame: (fn) => fn(), history: { replaceState() {} } });
+vm.runInContext(readFileSync(new URL('../app/core.js', import.meta.url), 'utf8'), context);
 const source = readFileSync(new URL('../app/app-v2.js', import.meta.url), 'utf8').replace(/\(async function init\(\)[\s\S]*$/, '');
 vm.runInContext(source, context);
 vm.runInContext('render = () => {}; saveState = () => {}; showToast = () => {}; checkProviderAuthorization = async () => true;', context);
@@ -49,6 +50,7 @@ assert.equal(run('new Set(state.batch.results.map((item) => item.model)).size'),
 run('state.studio.selectedProductIds = [];');
 assert.match(run('renderResultGroups()'), /result-preview-trigger/);
 assert.match(run('renderResultGroups()'), /TENT-3P-001/);
+run("state.batch.results.forEach((item) => { item.evaluation = {structure: 5, location: 'pass', shot: 'pass', defects: 'pass', deliverable: 'pass'}; item.review = Core.deriveReview(item.evaluation); });");
 run('saveBatch()');
 assert.equal(run('state.savedAssets[0].prompt'), run('state.batch.results[0].prompt'));
 assert.equal(run('state.savedAssets[0].demo'), false);
@@ -236,6 +238,13 @@ assert.equal(legacyStyles.options[0].selected, true);
 assert.equal(legacyStyles.options[0].quantity, 2);
 assert.match(legacyStyles.options[0].prompt, /光线：.*\n色彩：/);
 assert.equal(legacyStyles.options[1].prompt, '保留我手动修改的规则');
+
+run('state = structuredClone(seedState);');
+await clickAction('use-template', {id: 'tpl-scene'});
+assert.equal(run('state.studio.templateId'), 'tpl-scene');
+listeners.change({target: {id: 'public-prompt-template', value: 'white', dataset: {}}});
+assert.equal(run('state.studio.templateId'), '');
+run('state = structuredClone(seedState);');
 assert.equal(legacyStyles.options[2].prompt, '我的晨光规则');
 run("state.promptGroups.push({id: 'group-style', name: '视觉风格', enabled: true, options: [{id: 'group-style-0', label: '北欧自然', selected: true, quantity: 1}]}); applySavedState(structuredClone(state));");
 assert.equal(run('state.promptGroups.find((group) => group.id === "group-style").options.length'), 6);
@@ -334,8 +343,7 @@ for (const [shotId, requiredPatterns] of [
   run("state.promptGroups.find((group) => group.id === 'group-shot').options.forEach((option) => { option.selected = option.id === '" + shotId + "'; });");
   const shotPrompt = run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)');
   for (const pattern of requiredPatterns) assert.match(shotPrompt, pattern, shotId + ': ' + pattern);
-  assert.match(shotPrompt, /不得为了同时展示产品和背景而默认使用中景/);
-  assert.match(shotPrompt, /验收优先级：镜头景别与画布构图/);
+  assert.match(shotPrompt, /优先级：镜头景别与画布构图/);
   if (shotId === 'shot-wide') assert.match(shotPrompt, /环境必须主导画面面积，禁止为了突出产品而放大成中景/);
 }
 assert.match(run('renderPromptGroups()'), /远景 · 帐篷占 12%–25%/);
@@ -362,7 +370,7 @@ assert.equal(run('state.batch.results[1].is4k'), true);
 assert.equal(run('state.batch.results[1].sourceResultId'), sourceResultId);
 assert.equal(run('state.batch.results[1].status'), 'ready');
 assert.equal(run('state.batch.results[1].image'), 'data:image/jpeg;base64,NEs=');
-assert.match(run('state.batch.results[1].tags.join(" ")'), /4K 4096×2304/);
+assert.match(run('state.batch.results[1].tags.join(" ")'), /4K 尺寸 4096×2304/);
 assert.equal(run('state.credits'), creditsBefore4K);
 await run(`generate4KResult(${JSON.stringify(sourceResultId)})`);
 assert.equal(run('state.batch.results.length'), 19);

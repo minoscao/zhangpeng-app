@@ -19,6 +19,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 
 BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -57,14 +59,21 @@ else:
     DATA_DIR = PROJECT_ROOT / "data"
 STATE_FILE = DATA_DIR / "state.json"
 STATE_LOCK = threading.Lock()
+REMOTE_API_BASE = os.environ.get(
+    "DESIGNFLOW_REMOTE_API_BASE",
+    "https://zhangpeng-app.minoscao.workers.dev",
+).rstrip("/")
+MAX_PROXY_BODY_BYTES = 12 * 1024 * 1024
 
 
 def public_api_config() -> dict:
     return {
-        "provider": "qwen",
+        "provider": "openai",
+        "providers": ["openai", "qwen"],
         "userKeyRequired": True,
-        "model": "qwen-image-3.0-pro",
+        "model": "gpt-image-2",
         "maxBatchSize": 24,
+        "localStateWritable": True,
     }
 
 
@@ -134,6 +143,50 @@ class DesignFlowHandler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError):
             return {}
 
+    def _proxy_model_request(self, method: str, path: str) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length > MAX_PROXY_BODY_BYTES:
+            self._send_json(
+                {"error": {"code": "BODY_TOO_LARGE", "message": "单次请求不能超过 12MB。"}},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        body = self.rfile.read(length) if length else None
+        headers = {
+            name: self.headers[name]
+            for name in ("Content-Type", "X-Qwen-Api-Key", "X-OpenAI-Api-Key", "X-Client-Request-Id")
+            if self.headers.get(name)
+        }
+        request = UrlRequest(f"{REMOTE_API_BASE}{path}", data=body, headers=headers, method=method)
+        timeout = 210 if path.endswith("/generate") else 65
+        try:
+            with urlopen(request, timeout=timeout) as upstream:
+                response_body = upstream.read()
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json; charset=utf-8"))
+                self.send_header("Content-Length", str(len(response_body)))
+                self.send_header("Cache-Control", "no-store")
+                if upstream.headers.get("X-Request-Id"):
+                    self.send_header("X-Request-Id", upstream.headers["X-Request-Id"])
+                self.end_headers()
+                self.wfile.write(response_body)
+        except HTTPError as error:
+            response_body = error.read()
+            self.send_response(error.code)
+            self.send_header("Content-Type", error.headers.get("Content-Type", "application/json; charset=utf-8"))
+            self.send_header("Content-Length", str(len(response_body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(response_body)
+        except (URLError, TimeoutError, OSError):
+            self._send_json(
+                {"error": {"code": "REMOTE_API_UNAVAILABLE", "message": "本地应用暂时无法连接线上模型网关，请检查网络后重试。"}},
+                HTTPStatus.BAD_GATEWAY,
+            )
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
@@ -146,6 +199,9 @@ class DesignFlowHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             self._send_json(read_state())
+            return
+        if path.startswith("/api/qwen/tasks/"):
+            self._proxy_model_request("GET", path)
             return
         if path == "/":
             self._send_file(APP_DIR / "index.html")
@@ -184,7 +240,11 @@ class DesignFlowHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_POST(self) -> None:  # noqa: N802
-        if urlparse(self.path).path != "/api/shutdown":
+        path = urlparse(self.path).path
+        if path.startswith("/api/openai/") or path.startswith("/api/qwen/"):
+            self._proxy_model_request("POST", path)
+            return
+        if path != "/api/shutdown":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         self._send_json({"ok": True, "message": "创想设计平台已安全退出"})

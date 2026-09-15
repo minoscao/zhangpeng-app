@@ -2,17 +2,30 @@
 name: 创想设计平台
 description: 面向产品 SKU 的克制、清晰、高密度 AI 设计工作台
 colors:
+  brand-ink: "#24204f"
   brand-deep: "#302b68"
+  brand-mid: "#41388f"
   brand-primary: "#5145b4"
   brand-active: "#6658d6"
+  brand-muted: "#e8e5fb"
   brand-soft: "#f4f2ff"
   text-primary: "#272441"
+  text-strong: "#3f3b5c"
   text-secondary: "#6d6982"
+  text-muted: "#8d89a0"
   canvas: "#f4f3f9"
   surface: "#ffffff"
+  surface-soft: "#f8f7fc"
   border: "#e5e2ef"
+  border-strong: "#d4cfe4"
   success: "#278765"
+  success-soft: "#e6f5ef"
   warning: "#9a620d"
+  warning-soft: "#fff3d5"
+  info: "#3378b8"
+  info-soft: "#eaf3ff"
+  danger: "#b43c35"
+  danger-soft: "#ffebea"
 typography:
   headline:
     fontFamily: 'Aptos, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif'
@@ -29,10 +42,26 @@ typography:
     fontFamily: 'Aptos, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif'
     fontSize: "11px"
     fontWeight: 700
+  scale:
+    micro: "8px"
+    caption: "9px"
+    label: "10px"
+    compact: "11px"
+    secondary: "12px"
+    body-small: "13px"
+    body: "14px"
+    control-mobile: "16px"
+    title-small: "18px"
+    title: "20px"
+    title-large: "24px"
 rounded:
+  xxs: "6px"
+  xs: "8px"
   sm: "10px"
+  compact-card: "12px"
   md: "15px"
   lg: "20px"
+  pill: "999px"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -78,7 +107,7 @@ components:
 
 ## Layout
 
-桌面使用 210px 固定侧栏和自适应主区；批量工作台在宽屏为“配方 + 结果”双列，1040px 以下改为单列。产品表在 760px 以下压缩为 SKU、底图、名称和进入动作四列，不产生横向滚动。间距以 4px / 8px 为基础节奏。
+桌面使用 210px 固定侧栏和自适应主区；批量工作台在宽屏为“配方 + 结果”双列，1040px 以下改为单列。产品表在 900px 以下压缩为 SKU、底图、名称和进入动作四列，不产生横向滚动。间距以 4px / 8px 为基础节奏。
 
 ## Elevation & Depth
 

@@ -1,5 +1,7 @@
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
+const Core = globalThis.DesignFlowCore;
+if (!Core) throw new Error('DesignFlowCore 未加载。');
 
 const icons = {
   home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5M9 20v-6h6v6"/>',
@@ -230,14 +232,13 @@ const seedState = {
   batchHistory: [],
   studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', otherRequirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
-  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false },
+  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false, exportScope: 'all', exportTarget: '', exportFormat: 'original' },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
 };
 
 let state = structuredClone(seedState);
 let uploadImageData = '';
 let saveTimer;
-let generationTimer;
 let activeGenerationId = '';
 let lastFocusedElement = null;
 let keyDialogOpen = false;
@@ -262,6 +263,8 @@ let comparisonRequested = false;
 let durableStateDb;
 let storageWarningShown = false;
 let generationStarting = false;
+let hostStateWritable = false;
+const exportRuntime = { busy: false, message: '', error: '' };
 
 function stateDatabase() {
   durableStateDb ||= new Promise((resolve, reject) => {
@@ -326,7 +329,7 @@ function saveStylePrompt() {
   const option = state.promptGroups.find((group) => group.id === 'group-style')?.options.find((item) => item.id === stylePreviewId);
   const draft = stylePromptDraft.trim();
   if (!draft || draft.length > 1600) { stylePromptError = '请输入 1–1600 字的风格提示词。'; render(); $('#style-prompt-text')?.focus(); return; }
-  if (option) { option.prompt = draft; saveState(); }
+  if (option) { option.prompt = draft; markRecipeCustomized(); saveState(); }
   stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay();
 }
 
@@ -346,7 +349,12 @@ function applySavedState(saved) {
   if (!saved.studio?.provider || !PROVIDERS[state.studio.provider]) state.studio.provider = 'openai';
   if (!saved.batch?.generationMode && saved.batch?.results?.length) state.batch.generationMode = 'quality';
   if (saved.batch?.results?.length && !PROVIDERS[state.batch.provider]) state.batch.provider = 'qwen';
-  state.batch.results?.forEach((item) => { if (item.status === 'upscaling') { item.status = 'failed'; item.error = '页面在 4K 处理期间关闭，请点击重试，原图不会受影响。'; } });
+  state.batch.results?.forEach((item) => {
+    const hadEvaluation = item.evaluation && typeof item.evaluation === 'object';
+    if (item.status === 'upscaling') { item.status = 'failed'; item.error = '页面在 4K 处理期间关闭，请点击重试，原图不会受影响。'; }
+    item.evaluation = { ...Core.emptyEvaluation(), ...(item.evaluation || {}) };
+    item.review = hadEvaluation ? Core.deriveReview(item.evaluation) : 'pending';
+  });
   if (!state.connection.authenticated || typeof state.connection.authenticated !== 'object' || Array.isArray(state.connection.authenticated)) state.connection.authenticated = { openai: false, qwen: Boolean(state.connection.authenticated) };
   state.savedAssets.forEach((asset) => { if (seedSavedAssets.some((sample) => sample.id === asset.id)) { asset.demo = true; if (!asset.tags.includes('演示图 · 非实际生成')) asset.tags.push('演示图 · 非实际生成'); } });
   state.projects.forEach((project) => { if (['pr-1', 'pr-2'].includes(project.id)) project.type = '演示批次 · 非实际生成'; });
@@ -371,7 +379,10 @@ async function loadState() {
   } catch { /* small-state fallback remains available */ }
   try {
     const response = await fetch('/api/state', { cache: 'no-store' });
-    if (response.ok && response.headers.get('content-type')?.includes('application/json')) applySavedState(await response.json());
+    if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+      hostStateWritable = true;
+      applySavedState(await response.json());
+    }
   } catch { /* local seed remains usable */ }
   try {
     const response = await fetch('/api/config', { cache: 'no-store' });
@@ -386,12 +397,28 @@ async function loadState() {
 
 function saveState() {
   state.updatedAtMs = Date.now();
-  try { localStorage.setItem('designflow-state', JSON.stringify(state)); } catch { /* private mode may reject */ }
+  try {
+    const serialized = JSON.stringify(state);
+    if (serialized.length < 1_500_000) localStorage.setItem('designflow-state', serialized);
+    else localStorage.removeItem('designflow-state');
+  } catch { /* private mode or quota may reject; IndexedDB remains primary */ }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try { await persistDurableState(structuredClone(state)); }
-    catch { if (!storageWarningShown) { storageWarningShown = true; showToast('浏览器图片保存失败', '请及时下载图片；当前浏览器可能限制存储或空间不足。', 'info'); } }
+    const snapshot = structuredClone(state);
+    try {
+      await persistDurableState(snapshot);
+      if (hostStateWritable) {
+        const response = await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot) });
+        if (!response.ok) throw new Error('HOST_STATE_WRITE_FAILED');
+      }
+    }
+    catch { if (!storageWarningShown) { storageWarningShown = true; showToast('状态保存不完整', '请及时导出素材；浏览器存储、磁盘空间或本地主机写入可能受限。', 'info'); } }
   }, 180);
+}
+
+function markRecipeCustomized() {
+  state.studio.templateId = '';
+  confirmedPromptReviews = { batch: null, comparison: null };
 }
 
 function providerConfig(provider = state.studio.provider) { return PROVIDERS[provider] || PROVIDERS.openai; }
@@ -419,13 +446,14 @@ function isProviderApiKey(value) {
 
 const routeMeta = { home: ['工作台总览', '首页'], studio: ['批量素材生产', '创建设计'], products: ['SKU 与真实底图', '产品库'], templates: ['复用生产规则', '模板中心'], assets: ['全部二维图片', '素材库'], exports: ['交付与下载', '导出中心'], connections: ['生成服务', '模型连接'] };
 function productById(id) { return state.products.find((item) => item.id === id); }
-function selectedProducts() { return state.studio.selectedProductIds.map(productById).filter(Boolean); }
-function selectedOptions(group) { return group.options.filter((option) => option.selected && option.quantity > 0); }
-function groupFactor(group) { return group.enabled ? selectedOptions(group).reduce((sum, option) => sum + option.quantity, 0) : 1; }
-function enabledGroups() { return state.promptGroups.filter((group) => group.enabled && groupFactor(group) > 0); }
-function plannedTotal(forComparison = comparisonRequested) { if (forComparison) return selectedProducts().length ? Object.keys(providerConfig().profiles).length : 0; const products = selectedProducts().length; return products ? enabledGroups().reduce((total, group) => total * groupFactor(group), products) : 0; }
-function formulaText(forComparison = comparisonRequested) { if (forComparison) return `首个 SKU × 首个组合 × ${plannedTotal(forComparison)} 个模型配置 = ${plannedTotal(forComparison)} 张对比图`; return [`${selectedProducts().length} 个产品`, ...enabledGroups().map((group) => `${groupFactor(group)} 个${group.name}`)].join(' × ') + ` = ${plannedTotal(forComparison)} 张素材`; }
+function selectedProducts() { return Core.selectedProducts(state); }
+function selectedOptions(group) { return Core.selectedOptions(group); }
+function groupFactor(group) { return Core.groupFactor(group); }
+function enabledGroups() { return Core.enabledGroups(state); }
+function plannedTotal(forComparison = comparisonRequested) { return Core.plannedTotal(state, forComparison, Object.keys(providerConfig().profiles).length); }
+function formulaText(forComparison = comparisonRequested) { return Core.formulaText(state, forComparison, Object.keys(providerConfig().profiles).length); }
 function batchCost() { return plannedTotal() * CREDIT_PER_IMAGE; }
+function refundResultCredit(item) { if (item && !item.creditRefunded && !item.is4k) { item.creditRefunded = true; state.credits += CREDIT_PER_IMAGE; } }
 function generationProfile(mode = state.studio.generationMode, provider = state.studio.provider) { const profiles = providerConfig(provider).profiles; return profiles[mode] || profiles.fast; }
 function batchGenerationProfile() { return generationProfile(state.batch.generationMode || state.studio.generationMode, state.batch.provider || state.studio.provider); }
 function estimatedDuration(total, mode = state.studio.generationMode, provider = state.studio.provider) {
@@ -439,6 +467,7 @@ function estimatedDuration(total, mode = state.studio.generationMode, provider =
 }
 function productAssets(id) { return state.savedAssets.filter((asset) => asset.productId === id); }
 function batchReadyCount() { return state.batch.results.filter((item) => item.status === 'ready').length; }
+function batchApprovedCount() { return state.batch.results.filter((item) => item.status === 'ready' && item.review === 'pass').length; }
 function batchFailedCount() { return state.batch.results.filter((item) => item.status === 'failed').length; }
 function batchDelayedCount() { return state.batch.results.filter((item) => item.status === 'delayed').length; }
 function batchSettledCount() { return batchReadyCount() + batchFailedCount() + batchDelayedCount(); }
@@ -482,7 +511,7 @@ function renderTopbar() {
   const route = state.ui.route;
   $('#topbar-context').innerHTML = route === 'studio' ? `<div class="batch-context">${svgIcon('layers')}<span>${selectedProducts().length} 个产品 · ${plannedTotal()} 张计划素材</span></div>` : '';
   if (route === 'studio') {
-    $('#topbar-actions').innerHTML = `<button class="button button--secondary" data-action="open-product-picker">${svgIcon('plus')}选择产品</button>${state.batch.results.length ? `<button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}保存批次</button>` : ''}`;
+    $('#topbar-actions').innerHTML = `<button class="button button--secondary" data-action="open-product-picker">${svgIcon('plus')}选择产品</button>${state.batch.results.length ? `<button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}保存已验收素材</button>` : ''}`;
   } else if (route === 'products') {
     $('#topbar-actions').innerHTML = `<button class="button button--primary" data-action="open-import">${svgIcon('upload')}导入产品</button>`;
   } else {
@@ -497,7 +526,7 @@ function renderProducts() {
   return `<section class="page">${pageHeading('产品库', '以 SKU 和真实白底产品图为起点，集中维护产品资料与生成历史。', `<button class="button button--primary" data-action="open-import">${svgIcon('upload')}导入产品</button>`)}
     <div class="library-summary"><div><strong>${state.products.length}</strong><span>产品 SKU</span></div><div><strong>${state.savedAssets.length}</strong><span>历史素材</span></div><p>${svgIcon('info')}点击任意产品行，在右侧查看产品规格和已生成素材。</p></div>
     <div class="toolbar"><label class="search-wrap">${svgIcon('search')}<input class="input-control" id="product-search" type="search" placeholder="搜索产品名称、SKU 或品类" value="${escapeHtml(state.ui.productSearch)}" aria-label="搜索产品"></label><select class="select-control" id="category-filter" aria-label="按品类筛选">${categories.map((item) => `<option ${item === state.ui.productCategory ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></div>
-    <div class="product-table"><div class="table-row table-row--head"><span>SKU</span><span>底图</span><span>产品名称</span><span>品类</span><span>历史素材</span><span>设计批次</span><span>状态</span><span>更新时间</span><span></span></div>${filtered.length ? filtered.map((product) => `<div class="table-row table-row--interactive" role="button" tabindex="0" data-action="open-product-drawer" data-id="${product.id}" aria-label="查看${escapeHtml(product.name)}详情"><span class="table-sku">${escapeHtml(product.sku)}</span><span class="base-thumb"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}白底产品图"></span><span><strong>${escapeHtml(product.name)}</strong><small>真实产品底图已归档</small></span><span>${escapeHtml(product.category)}</span><span>${productAssets(product.id).length} 张</span><span>${product.versions} 个</span>${statusChip(product.status)}<span>${escapeHtml(product.updated)}</span><button class="button row-action" data-action="open-product-drawer" data-id="${product.id}" aria-label="打开${escapeHtml(product.name)}详情">${svgIcon('chevron')}</button></div>`).join('') : '<div class="empty-state">没有符合筛选条件的产品</div>'}</div>
+    <div class="product-table" role="table" aria-label="儿童帐篷产品库"><div class="table-row table-row--head" role="row"><span role="columnheader">SKU</span><span role="columnheader">底图</span><span role="columnheader">产品名称</span><span role="columnheader">品类</span><span role="columnheader">历史素材</span><span role="columnheader">设计批次</span><span role="columnheader">状态</span><span role="columnheader">更新时间</span><span role="columnheader">操作</span></div>${filtered.length ? filtered.map((product) => `<div class="table-row table-row--interactive" role="row" data-action="open-product-drawer" data-id="${product.id}"><span role="cell" class="table-sku">${escapeHtml(product.sku)}</span><span role="cell" class="base-thumb"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}白底产品图"></span><span role="cell"><strong>${escapeHtml(product.name)}</strong><small>真实产品底图已归档</small></span><span role="cell">${escapeHtml(product.category)}</span><span role="cell">${productAssets(product.id).length} 张</span><span role="cell">${product.versions} 个</span><span role="cell">${statusChip(product.status)}</span><span role="cell">${escapeHtml(product.updated)}</span><span role="cell"><button class="button row-action" data-action="open-product-drawer" data-id="${product.id}" aria-label="打开${escapeHtml(product.name)}详情">${svgIcon('chevron')}</button></span></div>`).join('') : '<div class="empty-state" role="row"><span role="cell">没有符合筛选条件的产品</span></div>'}</div>
   </section>`;
 }
 
@@ -549,14 +578,23 @@ async function enrichCity(label) {
   }
   group.enabled = true;
   option.selected = true;
+  markRecipeCustomized();
   cityDraft = '';
   regionPreviewId = option.id;
   saveState(); render();
   showToast('城市已加入当地背景', `${option.label} 已选中，其他城市与数量保持不变；可展开查看背景规则。`, 'check');
 }
 
+function evaluationOption(value, current, label) { return `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`; }
+
+function renderResultEvaluation(item) {
+  const evaluation = { ...Core.emptyEvaluation(), ...(item.evaluation || {}) };
+  const binaryOptions = (current, allowNA = false) => `${evaluationOption('pending', current, '待检查')}${evaluationOption('pass', current, '通过')}${evaluationOption('fail', current, '不通过')}${allowNA ? evaluationOption('na', current, '不适用') : ''}`;
+  return `<fieldset class="quality-rubric"><legend>交付验收 · ${item.review === 'pass' ? '可保存' : item.review === 'fail' ? '需重做' : '待完成'}</legend><label>产品结构保真<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="structure">${[0, 1, 2, 3, 4, 5].map((score) => `<option value="${score}" ${Number(evaluation.structure) === score ? 'selected' : ''}>${score ? `${score} / 5` : '待评分'}</option>`).join('')}</select></label><label>地域线索<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="location">${binaryOptions(evaluation.location, true)}</select></label><label>镜头景别<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="shot">${binaryOptions(evaluation.shot, true)}</select></label><label>明显缺陷<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="defects">${binaryOptions(evaluation.defects)}</select></label><label>可直接交付<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="deliverable">${binaryOptions(evaluation.deliverable)}</select></label></fieldset>`;
+}
+
 function renderBatchTools() {
-  return `<div class="batch-tools"><p>当前结果：${batchReadyCount()} 张完成 · ${batchFailedCount()} 张失败 · ${batchDelayedCount()} 张待查询。点击图片放大检查；4K 会从完成图创建高清导出版，不调用模型、不扣积分。</p>${state.batchHistory.length ? `<label for="batch-history">历史实际批次</label><select id="batch-history" class="select-control"><option value="">选择历史批次</option>${state.batchHistory.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.id)} · ${batch.results.length} 张 · ${escapeHtml(batch.startedAt)}</option>`).join('')}</select>` : ''}<details><summary>本批次模型、提示词与需求验收</summary>${state.batch.results.map((item, index) => `<div class="result-audit"><strong>${variantLabel(index)} · ${escapeHtml(item.productSnapshot?.sku || productById(item.productId)?.sku)} · ${escapeHtml(item.model || item.generationMode || '旧批次')}</strong><p>${escapeHtml(item.tags.join(' · '))}</p>${item.status === 'ready' ? `<label>需求符合度<select class="select-control" data-result-review="${escapeHtml(item.id)}"><option value="pending" ${!item.review || item.review === 'pending' ? 'selected' : ''}>待检查：结构 / 配色 / 地域 / 必须元素</option><option value="pass" ${item.review === 'pass' ? 'selected' : ''}>符合需求</option><option value="fail" ${item.review === 'fail' ? 'selected' : ''}>不符合需求，需修改或重做</option></select></label>` : ''}<pre>${escapeHtml(item.prompt || '旧批次未保存完整提示词；新批次会记录。')}</pre></div>`).join('')}</details></div>`;
+  return `<div class="batch-tools"><p>当前结果：${batchReadyCount()} 张完成 · ${batchApprovedCount()} 张通过验收 · ${batchFailedCount()} 张失败 · ${batchDelayedCount()} 张待查询。点击图片放大检查；“4K 尺寸版”仅扩大像素尺寸，不会增加模型细节，也不扣积分。</p>${state.batchHistory.length ? `<label for="batch-history">历史实际批次</label><select id="batch-history" class="select-control"><option value="">选择历史批次</option>${state.batchHistory.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.id)} · ${batch.results.length} 张 · ${escapeHtml(batch.startedAt)}</option>`).join('')}</select>` : ''}<details open><summary>本批次提示词与交付验收</summary>${state.batch.results.map((item, index) => `<div class="result-audit"><strong>${variantLabel(index)} · ${escapeHtml(item.productSnapshot?.sku || productById(item.productId)?.sku)} · ${escapeHtml(item.model || item.generationMode || '旧批次')}</strong><p>${escapeHtml(item.tags.join(' · '))}</p>${item.status === 'ready' ? renderResultEvaluation(item) : ''}<details class="result-prompt-details"><summary>查看实际提示词</summary><pre>${escapeHtml(item.prompt || '旧批次未保存完整提示词；新批次会记录。')}</pre></details></div>`).join('')}</details></div>`;
 }
 
 function renderResultGroups() {
@@ -570,9 +608,9 @@ function renderResultGroups() {
       const label = variantLabel(index);
       const ratio = /^\d+:\d+$/.test(item.ratio || '') ? item.ratio.replace(':', ' / ') : '4 / 3';
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 高清处理中' : item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '符合需求' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 高清版，不扣积分" title="生成 4K 高清导出版 · 不扣积分">4K</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 尺寸处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
 }
@@ -624,7 +662,7 @@ function renderStudio() {
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
     <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchReadyCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchReadyCount()} 张素材`}</button><p>${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片保存在当前浏览器，请及时下载备份；'}保存会保留 SKU 与完整提示词记录。</p></div>` : ''}
+    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchApprovedCount()} 张已验收素材`}</button><p>${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片保存在当前浏览器，请及时下载备份；'}只有完成交付验收的图片会写回 SKU，并保留完整提示词和评分。</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -633,7 +671,7 @@ function renderHome() {
 }
 
 function renderTemplates() {
-  return `<section class="page">${pageHeading('模板中心', '模板保存提示词结构和生产规则，不改变产品真实底图。')}<div class="card-grid">${state.templates.map((template) => `<article class="template-card"><img src="${template.image}" alt="${escapeHtml(template.name)}示例"><div class="card-body"><h3>${escapeHtml(template.name)}</h3><p>${escapeHtml(template.description)}</p><div class="card-meta"><span class="tag">${escapeHtml(template.tag)} · ${template.fields} 项规则</span><button class="button button--quiet" data-action="use-template" data-id="${template.id}">使用模板</button></div></div></article>`).join('')}</div></section>`;
+  return `<section class="page">${pageHeading('模板中心', '模板会真实切换公共场景、启用词组和输出规则，不改变产品参考图。')}<div class="card-grid">${state.templates.map((template) => { const active = state.studio.templateId === template.id; return `<article class="template-card ${active ? 'is-active' : ''}"><img src="${template.image}" alt="${escapeHtml(template.name)}示例"><div class="card-body"><h3>${escapeHtml(template.name)}</h3><p>${escapeHtml(template.description)}</p><div class="card-meta"><span class="tag">${escapeHtml(template.tag)} · ${template.fields} 项规则</span><button class="button ${active ? 'button--secondary' : 'button--quiet'}" data-action="use-template" data-id="${template.id}" aria-pressed="${active}">${active ? '当前模板' : '应用模板'}</button></div></div></article>`; }).join('')}</div></section>`;
 }
 
 function renderAssets() {
@@ -641,8 +679,23 @@ function renderAssets() {
   return `<section class="page">${pageHeading('素材库', '所有文件以二维图片形式保存，并保留 SKU、组合标签与批次信息。')}<div class="asset-library-grid">${assets.length ? assets.map((asset) => { const product = productById(asset.productId); return `<article class="asset-card"><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product?.name || '产品')}生成素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product?.name || '产品')}生成素材"></button><div class="card-body"><h3>${escapeHtml(product?.sku || '未关联 SKU')}</h3><p>${asset.tags.map(escapeHtml).join(' · ')}</p><div class="card-meta"><span class="tag">${escapeHtml(asset.batchId)}</span><button class="button button--quiet" data-action="download-asset" data-image="${escapeHtml(asset.image)}" data-name="${escapeHtml(product?.sku || '设计素材')}">${svgIcon('download')}下载</button></div></div></article>`; }).join('') : '<div class="empty-state">还没有已保存素材，请先完成一个批量任务。</div>'}</div></section>`;
 }
 
+function exportTargets() {
+  if (state.ui.exportScope === 'sku') return state.products.filter((product) => productAssets(product.id).length).map((product) => ({ value: product.id, label: `${product.sku} · ${product.name}` }));
+  if (state.ui.exportScope === 'batch') return [...new Set(state.savedAssets.map((asset) => asset.batchId).filter(Boolean))].map((batchId) => ({ value: batchId, label: batchId }));
+  return [];
+}
+
+function selectedExportAssets() {
+  if (state.ui.exportScope === 'sku') return state.savedAssets.filter((asset) => asset.productId === state.ui.exportTarget);
+  if (state.ui.exportScope === 'batch') return state.savedAssets.filter((asset) => asset.batchId === state.ui.exportTarget);
+  return state.savedAssets;
+}
+
 function renderExports() {
-  return `<section class="page">${pageHeading('导出中心', '按 SKU 或批次下载已确认的二维图片素材。')}<div class="export-grid"><article class="export-card">${svgIcon('folder')}<h3>按 SKU 导出</h3><p>将同一产品的全部素材打包下载。</p><button class="button button--quiet" data-route="products">选择产品</button></article><article class="export-card">${svgIcon('layers')}<h3>按批次导出</h3><p>保留提示词组合标签和任务编号。</p><button class="button button--quiet" data-route="assets">查看素材</button></article><article class="export-card">${svgIcon('download')}<h3>平台规格</h3><p>PNG、JPG、WebP 与常用电商画幅。</p><button class="button button--quiet" data-route="templates">选择预设</button></article></div></section>`;
+  const targets = exportTargets();
+  if (targets.length && !targets.some((target) => target.value === state.ui.exportTarget)) state.ui.exportTarget = targets[0].value;
+  const assets = selectedExportAssets();
+  return `<section class="page">${pageHeading('导出中心', '把已保存素材与提示词清单打包为真正可交付的 ZIP 文件。')}<div class="export-workspace"><section class="surface surface-pad export-config" aria-labelledby="export-config-title"><div class="section-title"><div><h3 id="export-config-title">建立导出包</h3><p>按全部素材、SKU 或批次筛选；压缩包会附带 manifest.json 追溯清单。</p></div></div><div class="export-form"><label>导出范围<select id="export-scope" class="select-control"><option value="all" ${state.ui.exportScope === 'all' ? 'selected' : ''}>全部已保存素材</option><option value="sku" ${state.ui.exportScope === 'sku' ? 'selected' : ''}>指定 SKU</option><option value="batch" ${state.ui.exportScope === 'batch' ? 'selected' : ''}>指定批次</option></select></label>${state.ui.exportScope === 'all' ? '' : `<label>${state.ui.exportScope === 'sku' ? '选择 SKU' : '选择批次'}<select id="export-target" class="select-control">${targets.map((target) => `<option value="${escapeHtml(target.value)}" ${target.value === state.ui.exportTarget ? 'selected' : ''}>${escapeHtml(target.label)}</option>`).join('')}</select></label>`}<label>图片格式<select id="export-format" class="select-control"><option value="original" ${state.ui.exportFormat === 'original' ? 'selected' : ''}>保留原格式（推荐）</option><option value="jpeg" ${state.ui.exportFormat === 'jpeg' ? 'selected' : ''}>统一 JPG</option><option value="png" ${state.ui.exportFormat === 'png' ? 'selected' : ''}>统一 PNG</option><option value="webp" ${state.ui.exportFormat === 'webp' ? 'selected' : ''}>统一 WebP</option></select></label></div><div class="export-summary"><div><strong>${assets.length}</strong><span>张素材将被打包</span></div><div><strong>${new Set(assets.map((asset) => asset.productId)).size}</strong><span>个 SKU</span></div><div><strong>${new Set(assets.map((asset) => asset.batchId)).size}</strong><span>个批次</span></div></div>${exportRuntime.error ? `<p class="field-error" role="alert">${escapeHtml(exportRuntime.error)}</p>` : ''}${exportRuntime.message ? `<p class="export-success" role="status">${escapeHtml(exportRuntime.message)}</p>` : ''}<button class="button button--primary export-submit" data-action="export-assets" ${exportRuntime.busy || !assets.length ? 'disabled' : ''}>${svgIcon('download')}${exportRuntime.busy ? '正在整理压缩包…' : `导出 ${assets.length} 张素材`}</button></section><aside class="surface surface-pad export-notes"><h3>压缩包内容</h3><ul><li>图片按 SKU 文件夹整理</li><li>文件名包含批次编号和序号</li><li>清单保留模型、提示词、标签与验收结果</li><li>格式转换在本地浏览器完成，不会调用模型或扣积分</li></ul><p>若临时模型图片地址已经失效，系统会停止导出并指出原因，不会生成缺文件的压缩包。</p></aside></div></section>`;
 }
 
 function renderConnections() {
@@ -705,7 +758,7 @@ function renderRegionPreview() {
 }
 
 function reviewFingerprint(forComparison = comparisonRequested) {
-  return JSON.stringify([selectedProducts(), buildCombinations(), state.studio.publicPromptId, state.publicPrompts, state.studio.universalPrompt, state.studio.otherRequirements, state.studio.provider, state.studio.generationMode, state.studio.ratio, forComparison]);
+  return Core.reviewFingerprint(state, forComparison, Object.keys(providerConfig().profiles).length);
 }
 
 function hasConfirmedPromptReview(forComparison = false) {
@@ -912,16 +965,7 @@ function closeImport() {
 }
 
 function buildCombinations() {
-  let combinations = [{ tags: [], promptDetails: [], ratio: state.studio.ratio }];
-  enabledGroups().forEach((group) => {
-    const expanded = selectedOptions(group).flatMap((option) => Array.from({ length: option.quantity }, () => ({ label: option.label, prompt: option.prompt || option.label, ratio: option.ratio })));
-    combinations = combinations.flatMap((combo) => expanded.map((option) => ({
-      tags: [...combo.tags, `${group.name}：${option.label}`],
-      promptDetails: [...combo.promptDetails, `${group.name}：${option.prompt}`],
-      ratio: option.ratio || combo.ratio,
-    })));
-  });
-  return combinations;
+  return Core.buildCombinations(state);
 }
 
 function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
@@ -996,27 +1040,7 @@ function openApiKeyDialog(provider = state.studio.provider, action = '') {
 }
 
 function generationPrompt(product, tags, promptDetails = [], ratio = state.studio.ratio) {
-  const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
-  const rules = template?.id === 'white' || template?.backgroundMode === 'none' ? (promptDetails.length ? promptDetails : tags).filter((tag) => !tag.startsWith('当地背景：')) : (promptDetails.length ? promptDetails : tags);
-  const shotRule = rules.find((rule) => rule.startsWith('镜头景别：'))?.replace(/^镜头景别：/, '') || '';
-  const wideShot = /环境远景|建立镜头/.test(shotRule);
-  const combination = rules.map((tag) => tag.replace('：', '要求为').replace(/[。；\\s]+$/, '')).join('；');
-  return [
-    '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
-    wideShot ? `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面中唯一的商业产品；本张为远景，环境必须主导画面面积，禁止为了突出产品而放大成中景。` : `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
-    shotRule ? `镜头景别硬性约束（最高构图优先级，不得自动折中成中景）：${shotRule}。必须同时满足摄影距离、等效焦段、帐篷画面占比和环境占比；若占比不符即视为生成失败。` : '',
-    '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
-    `场景任务：${template?.prompt || ''}`,
-    '验收优先级：镜头景别与画布构图 > 产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
-    combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料，视觉风格仅控制摄影语言，不覆盖产品配色、指定地标或场景模板。` : '',
-    `画幅比例：${ratio}。画布方向与构图必须遵循所选画布尺寸。`,
-    state.studio.otherRequirements?.trim() ? `其他要求（每张图共用，保留用户原意并与上述要求共同落实）：\n${state.studio.otherRequirements.trim()}` : '',
-    state.studio.universalPrompt,
-    '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
-    '产品质感：清楚表现织物纤维、包边、缝线、褶皱张力和支架材质；边缘干净、接触阴影可信，避免塑料感、蜡感、过度磨皮、结构变形和悬浮感。',
-    shotRule ? '景别验收：生成前再次检查帐篷在画面中的面积比例与四周环境留量，必须与所选近景、中景或远景对应；不得为了同时展示产品和背景而默认使用中景。' : '',
-    '整体适合国际儿童用品品牌、电商主视觉与高端产品手册；如出现儿童或家庭人物，动作自然、比例正确且不得遮挡帐篷关键结构。',
-  ].filter(Boolean).join('\n');
+  return Core.compilePrompt(state, product, tags, promptDetails, ratio);
 }
 
 function blobToDataUrl(blob) {
@@ -1060,10 +1084,11 @@ async function submitQwenResult(result) {
   const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
   const referenceImage = await referenceImageForModel(product);
+  result.requestId ||= uid('request');
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.taskId = task.taskId;
   result.model = task.model;
@@ -1081,10 +1106,11 @@ async function submitOpenAiResult(result) {
   result.submittedAt = Date.now();
   result.remoteStatus = 'RUNNING';
   saveState(); render();
+  result.requestId ||= uid('request');
   const output = await apiJson('/api/openai/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.image = output.imageUrl;
   result.model = output.model;
@@ -1134,6 +1160,7 @@ async function runWithConcurrency(items, concurrency, operation) {
       } catch (error) {
         item.status = 'failed';
         item.error = error.message;
+        refundResultCredit(item);
         if (error.code === 'KEY_REQUIRED' || error.code === 'KEY_INVALID') activeGenerationId = '';
       }
       saveState(); render();
@@ -1163,6 +1190,7 @@ async function pollQwenBatch(batchId) {
       } else if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(task.taskStatus)) {
         item.status = 'failed';
         item.error = task.error?.message || '模型未能完成这张图片，请重试。';
+        refundResultCredit(item);
       } else if (Date.now() - item.submittedAt >= QWEN_TASK_TIMEOUT_MS) {
         item.status = 'delayed';
         item.error = '已等待 10 分钟，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
@@ -1207,13 +1235,12 @@ async function startBatchGeneration() {
     syncPromptConfirmationControls(); showToast('选项已变更', '请重新确认提示词，尚未提交或扣分。'); return;
   }
   promptReview = structuredClone(approvedReview);
-  clearInterval(generationTimer);
   const isComparison = requestedComparison;
   const combinations = isComparison ? buildCombinations().slice(0, 1) : buildCombinations();
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
   const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
   const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
-  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false }))));
+  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false }))));
   if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
   confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
@@ -1242,7 +1269,7 @@ async function regenerateResult(id) {
   state.credits -= CREDIT_PER_IMAGE;
   item.previousAttempts ||= [];
   item.previousAttempts.push({ prompt: item.prompt, model: item.model, review: item.review, error: item.error });
-  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.error = ''; item.saved = false; item.review = 'pending';
+  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.requestId = uid('request'); item.error = ''; item.saved = false; item.review = 'pending'; item.evaluation = Core.emptyEvaluation(); item.creditRefunded = false;
   item.prompt ||= generationPrompt(item.productSnapshot || productById(item.productId), item.tags.filter((tag) => !tag.startsWith('模型：')), item.promptDetails, item.ratio);
   state.batch.provider = provider;
   activeGenerationId = state.batch.id;
@@ -1259,6 +1286,7 @@ async function regenerateResult(id) {
   } catch (error) {
     activeGenerationId = '';
     item.status = 'failed'; item.error = error.message;
+    refundResultCredit(item);
     saveState(); render(); showToast('重新生成失败', error.message, 'info');
   }
 }
@@ -1307,11 +1335,11 @@ async function resumePendingBatch() {
 
 function saveBatch() {
   if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后归档，已完成的单张图片可先下载。', 'info'); return; }
-  const unsaved = state.batch.results.filter((item) => item.status === 'ready' && !item.saved);
-  if (!unsaved.length) { showToast('没有待保存素材', '当前批次已经保存或仍在生成。', 'info'); return; }
-  unsaved.forEach((result) => { state.savedAssets.unshift({ id: uid('asset'), productId: result.productId, image: result.image, tags: result.tags.map((tag) => tag.split('：')[1] || tag), prompt: result.prompt, model: result.model, review: result.review, demo: false, batchId: state.batch.id, createdAt: '刚刚' }); result.saved = true; });
+  const unsaved = state.batch.results.filter((item) => item.status === 'ready' && item.review === 'pass' && !item.saved);
+  if (!unsaved.length) { showToast('没有可保存的素材', '请先展开“交付验收”，完成结构、地域、景别、缺陷和交付检查。', 'info'); return; }
+  unsaved.forEach((result) => { state.savedAssets.unshift({ id: uid('asset'), productId: result.productId, image: result.image, tags: result.tags.map((tag) => tag.split('：')[1] || tag), prompt: result.prompt, model: result.model, evaluation: structuredClone(result.evaluation), review: result.review, demo: false, batchId: state.batch.id, createdAt: '刚刚' }); result.saved = true; });
   new Set(unsaved.map((item) => item.productId)).forEach((productId) => { const product = productById(productId); if (product) { product.references = productAssets(productId).length; product.versions += 1; product.status = '已有素材'; product.updated = '刚刚'; } });
-  state.batch.status = 'saved'; state.batch.savedAt = nowLabel();
+  state.batch.status = state.batch.results.some((item) => item.status === 'ready' && !item.saved) ? 'ready' : 'saved'; state.batch.savedAt = nowLabel();
   state.projects.unshift({ id: uid('project'), name: `${new Set(state.batch.results.map((item) => item.productId)).size} 个 SKU 批量素材`, type: '批量创作', image: state.batch.results.find((item) => item.status === 'ready')?.image || RESULT_IMAGES[0], updated: '刚刚' });
   saveState(); render(); showToast('素材已归档', `${unsaved.length} 张图片已回写到对应 SKU。`, 'folder');
 }
@@ -1331,10 +1359,10 @@ function upscaleImageTo4K(source, ratio = '4:3') {
         context.imageSmoothingQuality = 'high';
         context.drawImage(image, 0, 0, width, height);
         canvas.toBlob(async (blob) => {
-          if (!blob) { reject(new Error('4K 图片导出失败，请重试。')); return; }
+          if (!blob) { reject(new Error('4K 尺寸版导出失败，请重试。')); return; }
           try { resolve(await blobToDataUrl(blob)); } catch (error) { reject(error); }
         }, 'image/jpeg', 0.95);
-      } catch { reject(new Error('原图不允许浏览器进行 4K 处理，请先下载原图后重试。')); }
+      } catch { reject(new Error('原图不允许浏览器进行 4K 尺寸处理，请先下载原图后重试。')); }
     };
     image.onerror = () => reject(new Error('无法读取原图，请检查图片链接是否仍然有效。'));
     image.src = source;
@@ -1343,13 +1371,13 @@ function upscaleImageTo4K(source, ratio = '4:3') {
 
 async function generate4KResult(sourceId) {
   const source = state.batch.results.find((item) => item.id === sourceId);
-  if (!source?.image || source.status !== 'ready') { showToast('暂时不能生成 4K', '请等待原图生成完成后再试。', 'info'); return; }
-  if (state.batch.results.some((item) => item.sourceResultId === sourceId && ['upscaling', 'ready'].includes(item.status))) { showToast('4K 版本已在队列中', '无需重复创建，可直接等待或下载已有 4K 图片。', 'info'); return; }
+  if (!source?.image || source.status !== 'ready') { showToast('暂时不能创建 4K 尺寸版', '请等待原图生成完成后再试。', 'info'); return; }
+  if (state.batch.results.some((item) => item.sourceResultId === sourceId && ['upscaling', 'ready'].includes(item.status))) { showToast('4K 尺寸版已在队列中', '无需重复创建，可直接等待或下载已有文件。', 'info'); return; }
   const [width, height] = FOUR_K_DIMENSIONS[source.ratio] || FOUR_K_DIMENSIONS['4:3'];
   const task = {
     ...structuredClone(source), id: uid('result-4k'), image: '', status: 'upscaling', remoteStatus: 'LOCAL_4K', submittedAt: Date.now(), completedAt: 0,
     is4k: true, sourceResultId: source.id, saved: false, review: source.review, taskId: '', error: '',
-    model: `${source.model || '原图'} · 4K`, tags: [...source.tags.filter((tag) => !tag.startsWith('输出：')), `输出：4K ${width}×${height}`],
+    model: `${source.model || '原图'} · 4K 尺寸导出`, tags: [...source.tags.filter((tag) => !tag.startsWith('输出：')), `输出：4K 尺寸 ${width}×${height} · 插值放大`],
   };
   const sourceIndex = state.batch.results.indexOf(source);
   state.batch.results.splice(sourceIndex + 1, 0, task);
@@ -1358,10 +1386,10 @@ async function generate4KResult(sourceId) {
   try {
     task.image = await upscaleImageTo4K(source.image, source.ratio);
     task.status = 'ready'; task.completedAt = Date.now(); task.remoteStatus = 'SUCCEEDED';
-    saveState(); render(); showToast('4K 高清版已完成', `${width} × ${height}，已加入当前结果队列，不扣积分。`, 'sparkles');
+    saveState(); render(); showToast('4K 尺寸版已完成', `${width} × ${height}，属于插值导出，不增加模型细节，也不扣积分。`, 'sparkles');
   } catch (error) {
     task.status = 'failed'; task.error = error.message;
-    saveState(); render(); showToast('4K 处理失败', error.message, 'info');
+    saveState(); render(); showToast('4K 尺寸处理失败', error.message, 'info');
   }
 }
 
@@ -1371,6 +1399,22 @@ function downloadImage(image, name = '设计图片') {
   anchor.href = image; anchor.download = `${name.replace(/[\\/:*?"<>|]/g, '_')}.${extension}`;
   document.body.append(anchor); anchor.click(); anchor.remove();
   showToast('已开始导出', `${name} 正在下载。`, 'download');
+}
+
+async function exportSelectedAssets() {
+  if (exportRuntime.busy || !globalThis.DesignFlowExport) return;
+  const assets = selectedExportAssets();
+  if (!assets.length) { exportRuntime.error = '当前范围没有可导出的素材。'; render(); return; }
+  exportRuntime.busy = true; exportRuntime.error = ''; exportRuntime.message = ''; render();
+  try {
+    const suffix = state.ui.exportScope === 'all' ? '全部素材' : state.ui.exportTarget;
+    const result = await globalThis.DesignFlowExport.exportAssetsZip({ assets, products: state.products, format: state.ui.exportFormat, archiveName: `创想设计平台-${suffix}` });
+    exportRuntime.message = `已导出 ${result.count} 张素材，压缩包包含图片和完整追溯清单。`;
+  } catch (error) {
+    exportRuntime.error = error.message || '导出失败，请检查图片是否仍然有效。';
+  } finally {
+    exportRuntime.busy = false; render();
+  }
 }
 
 document.addEventListener('click', async (event) => {
@@ -1398,7 +1442,7 @@ document.addEventListener('click', async (event) => {
     if (!name) { $('#public-prompt-name')?.focus(); return; }
     const source = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
     const template = { ...source, id: uid('public'), name, prompt: $('#public-prompt-content').value };
-    state.publicPrompts.push(template); state.studio.publicPromptId = template.id; saveState(); render(); return;
+    state.publicPrompts.push(template); state.studio.publicPromptId = template.id; markRecipeCustomized(); saveState(); render(); return;
   }
   if (action === 'review-comparison') {
     if (state.batch.status === 'generating') return;
@@ -1429,12 +1473,13 @@ document.addEventListener('click', async (event) => {
   if (action === 'finish-product-picker') { closeOverlay(); setRoute('studio'); }
   if (action === 'remove-selected-product') {
     state.studio.selectedProductIds = state.studio.selectedProductIds.filter((id) => id !== button.dataset.id);
+    markRecipeCustomized();
     saveState(); render();
   }
   if (action === 'open-prompt-library') { rememberFocus(); state.ui.promptDialogGroupId = 'library'; render(); focusOverlay(); }
   if (action === 'edit-prompt-group') { rememberFocus(); state.ui.promptDialogGroupId = button.dataset.id; render(); focusOverlay(); }
-  if (action === 'toggle-prompt-group') { const group = state.promptGroups.find((item) => item.id === button.dataset.id); if (group) group.enabled = !group.enabled; saveState(); render(); }
-  if (action === 'delete-prompt-group') { state.promptGroups = state.promptGroups.filter((item) => item.id !== button.dataset.id); saveState(); render(); }
+  if (action === 'toggle-prompt-group') { const group = state.promptGroups.find((item) => item.id === button.dataset.id); if (group) { group.enabled = !group.enabled; markRecipeCustomized(); } saveState(); render(); }
+  if (action === 'delete-prompt-group') { state.promptGroups = state.promptGroups.filter((item) => item.id !== button.dataset.id); markRecipeCustomized(); saveState(); render(); }
   if (action === 'add-library-group') {
     const source = state.promptLibrary.find((item) => item.id === button.dataset.id);
     if (source && !state.promptGroups.some((item) => item.id === source.id)) {
@@ -1443,12 +1488,12 @@ document.addEventListener('click', async (event) => {
     }
     state.ui.promptDialogGroupId = source?.id || '';
     if (source?.id === 'group-style') openStylePrompt(state.promptGroups.find((group) => group.id === source.id).options.find((option) => option.selected) || state.promptGroups.find((group) => group.id === source.id).options[0]);
-    saveState(); render(); focusOverlay();
+    markRecipeCustomized(); saveState(); render(); focusOverlay();
   }
   if (action === 'create-custom-group') {
     const input = $('#custom-group-name'); const name = input?.value.trim();
     if (!name) { input?.focus(); return; }
-    const id = uid('group-custom'); state.promptGroups.push({ id, name, enabled: true, options: [] }); state.ui.promptDialogGroupId = id;
+    const id = uid('group-custom'); state.promptGroups.push({ id, name, enabled: true, options: [] }); state.ui.promptDialogGroupId = id; markRecipeCustomized();
     saveState(); render(); focusOverlay();
   }
   if (action === 'toggle-prompt-option') {
@@ -1456,17 +1501,17 @@ document.addEventListener('click', async (event) => {
     if (option) option.selected = !option.selected;
     if (group?.id === 'group-location' && option?.selected) regionPreviewId = option.id;
     if (group?.id === 'group-style' && option?.selected) openStylePrompt(option);
-    saveState(); render(); focusOverlay();
+    markRecipeCustomized(); saveState(); render(); focusOverlay();
   }
   if (action === 'change-option-quantity') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const option = group?.options.find((item) => item.id === button.dataset.id);
-    if (option) option.quantity = Math.max(1, Math.min(9, option.quantity + Number(button.dataset.delta)));
+    if (option) { option.quantity = Math.max(1, Math.min(9, option.quantity + Number(button.dataset.delta))); markRecipeCustomized(); }
     saveState(); render(); focusOverlay();
   }
   if (action === 'add-prompt-option') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const input = $('#new-option-label'); const label = input?.value.trim();
     if (group?.id === 'group-location' && label) { await enrichCity(label); return; }
-    if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); if (group.id === 'group-style') { const upgraded = upgradeVisualStyleGroup(group); group.options = upgraded.options; openStylePrompt(group.options.find((option) => option.label === label)); } saveState(); render(); focusOverlay(); } else input?.focus();
+    if (group && label) { group.options.push({ id: uid('option'), label, prompt: label, description: '自定义选项', selected: true, quantity: 1 }); if (group.id === 'group-style') { const upgraded = upgradeVisualStyleGroup(group); group.options = upgraded.options; openStylePrompt(group.options.find((option) => option.label === label)); } markRecipeCustomized(); saveState(); render(); focusOverlay(); } else input?.focus();
   }
   if (action === 'finish-prompt-editor') closeOverlay();
   if (action === 'set-provider') {
@@ -1498,7 +1543,13 @@ document.addEventListener('click', async (event) => {
   if (action === 'check-result') await checkExistingResult(button.dataset.id);
   if (action === 'delete-result') { if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后删除结果。', 'info'); return; } state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
   if (action === 'save-batch') saveBatch();
-  if (action === 'use-template') { state.studio.templateId = button.dataset.id; setRoute('studio'); showToast('模板已加载', '提示词结构和输出规格已准备好。', 'grid'); }
+  if (action === 'use-template') {
+    const recipe = Core.applyTemplate(state, button.dataset.id);
+    if (!recipe) { showToast('模板不可用', '找不到对应配方，请刷新页面后重试。', 'info'); return; }
+    promptReview = null; confirmedPromptReviews = { batch: null, comparison: null };
+    saveState(); setRoute('studio'); showToast('模板已应用到配方', recipe.summary, 'grid');
+  }
+  if (action === 'export-assets') await exportSelectedAssets();
   if (action === 'download-asset') downloadImage(button.dataset.image, button.dataset.name);
   if (action === 'download-result') { const result = state.batch.results.find((item) => item.id === button.dataset.id); const product = result ? productById(result.productId) : null; if (result?.image) downloadImage(result.image, `${product?.sku || 'Qwen'}-${state.batch.id}`); }
   if (action === 'authorize-provider') {
@@ -1536,7 +1587,7 @@ document.addEventListener('click', async (event) => {
     keyDialogError = '';
     pendingKeyAction = '';
     render();
-    showToast(`${providerConfig(provider).shortName}连接正常`, `密钥已验证，可使用 ${providerConfig(provider).profiles.fast.model}。`, 'check');
+    showToast(`${providerConfig(provider).shortName}密钥有效`, '基础身份验证已通过；所选图像模型的权限和额度会在首次生成时确认。', 'check');
     if (nextAction === 'generate') await startBatchGeneration();
     if (nextAction.startsWith('regenerate:')) await regenerateResult(nextAction.slice('regenerate:'.length));
     if (nextAction.startsWith('check-result:')) await checkExistingResult(nextAction.slice('check-result:'.length));
@@ -1559,8 +1610,8 @@ document.addEventListener('input', (event) => {
     }
   }
   if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }
-  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); refreshInlinePromptReview(); } }
-  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); refreshInlinePromptReview(); }
+  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; markRecipeCustomized(); saveState(); refreshInlinePromptReview(); } }
+  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; markRecipeCustomized(); saveState(); refreshInlinePromptReview(); }
   if (event.target.id === 'product-search') {
     state.ui.productSearch = event.target.value;
     const position = event.target.selectionStart;
@@ -1573,8 +1624,20 @@ document.addEventListener('change', (event) => {
   if (event.target.id === 'prompt-review-entry' && !promptReviewEditing) { const index = Number(event.target.value); if (Number.isInteger(index) && promptReview?.entries[index]) { promptReviewIndex = index; promptReviewError = ''; render(); $('#prompt-review-entry')?.focus(); } return; }
   if (event.target.id === 'studio-provider') { setStudioProvider(event.target.value); return; }
   if (event.target.id === 'studio-quality') { setStudioQuality(event.target.value); return; }
-  if (event.target.id === 'public-prompt-template') { state.studio.publicPromptId = event.target.value; saveState(); render(); }
-  if (event.target.dataset.resultReview) { const item = state.batch.results.find((result) => result.id === event.target.dataset.resultReview); if (item) { item.review = event.target.value; saveState(); } }
+  if (event.target.id === 'public-prompt-template') { state.studio.publicPromptId = event.target.value; markRecipeCustomized(); saveState(); render(); }
+  if (event.target.dataset.resultEvaluation) {
+    const item = state.batch.results.find((result) => result.id === event.target.dataset.resultEvaluation);
+    if (item) {
+      item.evaluation = { ...Core.emptyEvaluation(), ...(item.evaluation || {}) };
+      item.evaluation[event.target.dataset.field] = event.target.dataset.field === 'structure' ? Number(event.target.value) : event.target.value;
+      item.review = Core.deriveReview(item.evaluation);
+      saveState(); render();
+    }
+    return;
+  }
+  if (event.target.id === 'export-scope') { state.ui.exportScope = event.target.value; state.ui.exportTarget = ''; exportRuntime.error = ''; exportRuntime.message = ''; saveState(); render(); return; }
+  if (event.target.id === 'export-target') { state.ui.exportTarget = event.target.value; exportRuntime.error = ''; exportRuntime.message = ''; saveState(); render(); return; }
+  if (event.target.id === 'export-format') { state.ui.exportFormat = event.target.value; exportRuntime.error = ''; exportRuntime.message = ''; saveState(); render(); return; }
   if (event.target.id === 'batch-history' && event.target.value && state.batch.status !== 'generating') {
     const index = state.batchHistory.findIndex((batch) => batch.id === event.target.value);
     if (index >= 0) { const chosen = state.batchHistory.splice(index, 1)[0]; if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch)); state.batch = chosen; saveState(); render(); }
@@ -1590,7 +1653,6 @@ document.addEventListener('change', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.table-row--interactive')) { event.preventDefault(); openProductDrawer(event.target.dataset.id); }
   if (event.key === 'Escape') { if (imagePreview) closeImagePreview(); else if (!$('#import-modal').hidden) closeImport(); else if ($('#overlay-root').innerHTML) closeOverlay(); }
   if (event.key === 'Tab' && $('.overlay-panel')) {
     const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]', $('.overlay-panel')).filter((item) => item.offsetParent !== null);
