@@ -11,6 +11,7 @@ const source = readFileSync(new URL('../app/app-v2.js', import.meta.url), 'utf8'
 vm.runInContext(source, context);
 vm.runInContext('render = () => {}; saveState = () => {}; showToast = () => {}; checkProviderAuthorization = async () => true;', context);
 const run = (code) => vm.runInContext(code, context);
+run('const productionPollQwenBatch = pollQwenBatch; const productionFinishBatch = finishBatch; const productionSleep = sleep; const productionApiJson = apiJson;');
 
 assert.equal(run('plannedTotal()'), 18);
 await run("enrichCity('墨尔本')");
@@ -82,6 +83,45 @@ run('state.batch.status = "generating"; state.batch.results = [{status: "loading
 await run('resumePendingBatch()');
 assert.equal(run('state.batch.results[0].status'), 'failed');
 assert.match(run('state.batch.results[0].error'), /可能已计费/);
+
+run(`state = structuredClone(seedState);
+  state.savedAssets = [];
+  state.batch = {id: 'B-POLL-RETRY', status: 'generating', provider: 'qwen', generationMode: 'quality', submissionComplete: true, nextSubmissionAt: 0, results: [{
+    id: 'result-poll-retry', productId: 'p-1', productSnapshot: structuredClone(state.products[0]), image: '', tags: ['当地背景：悉尼'], prompt: '测试自动查询与归档', provider: 'qwen', generationMode: 'quality', model: 'qwen-image-3.0-pro', evaluation: Core.emptyEvaluation(), review: 'pending', status: 'loading', taskId: 'task-poll-retry', submittedAt: Date.now(), remoteStatus: 'RUNNING', error: '', saved: false, creditRefunded: false
+  }]};
+  activeGenerationId = state.batch.id;
+  let transientPollAttempts = 0;
+  sleep = async () => {};
+  apiJson = async () => {
+    transientPollAttempts += 1;
+    if (transientPollAttempts === 1) { const error = new Error('临时网络抖动'); error.code = 'NETWORK_ERROR'; throw error; }
+    return {taskStatus: 'SUCCEEDED', imageUrls: ['https://example.com/generated.jpg']};
+  };`);
+await run("productionPollQwenBatch('B-POLL-RETRY')");
+assert.equal(run('transientPollAttempts'), 2);
+assert.equal(run('state.batch.status'), 'ready');
+assert.equal(run('state.batch.results[0].status'), 'ready');
+assert.equal(run('state.batch.results[0].creditRefunded'), false);
+assert.equal(run('state.savedAssets.length'), 1);
+assert.equal(run('state.savedAssets[0].sourceResultId'), 'result-poll-retry');
+assert.equal(run('state.savedAssets[0].review'), 'pending');
+assert.match(run('state.savedAssets[0].tags.join(" ")'), /待验收/);
+run("state.batch.results[0].evaluation = {structure: 5, location: 'pass', shot: 'pass', defects: 'pass', deliverable: 'pass'}; state.batch.results[0].review = Core.deriveReview(state.batch.results[0].evaluation); syncResultAsset(state.batch.results[0]);");
+assert.equal(run('state.savedAssets.length'), 1);
+assert.equal(run('state.savedAssets[0].review'), 'pass');
+assert.match(run('state.savedAssets[0].tags.join(" ")'), /验收通过/);
+
+run(`state = structuredClone(seedState); state.credits = 100; state.batch = {id: 'B-STOP', status: 'generating', provider: 'qwen', submissionComplete: false, results: [
+  {id:'queued', status:'queued', productId:'p-1', tags:[], creditRefunded:false},
+  {id:'submitting', status:'submitting', productId:'p-1', tags:[], creditRefunded:false},
+  {id:'running', status:'loading', taskId:'task-running', productId:'p-1', tags:[], creditRefunded:false}
+]}; activeGenerationId = ''; productionFinishBatch('B-STOP');`);
+assert.equal(run('state.batch.status'), 'delayed');
+assert.equal(run("state.batch.results.find((item) => item.id === 'queued').status"), 'failed');
+assert.equal(run("state.batch.results.find((item) => item.id === 'submitting').status"), 'failed');
+assert.equal(run("state.batch.results.find((item) => item.id === 'running').status"), 'delayed');
+assert.equal(run('state.credits'), 103);
+run('sleep = productionSleep; apiJson = productionApiJson;');
 
 run('state = structuredClone(seedState); state.schemaVersion = 7; state.studio.generationMode = "fast"; applySavedState(structuredClone(state));');
 assert.equal(run('state.schemaVersion'), 12);

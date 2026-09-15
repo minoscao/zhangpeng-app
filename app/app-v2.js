@@ -38,7 +38,8 @@ const RESULT_IMAGES = ['/assets/studio/tent-hero.png', '/assets/studio/tent-vari
 const CREDIT_PER_IMAGE = 3;
 const FOUR_K_DIMENSIONS = Object.freeze({ '1:1': [4096, 4096], '3:4': [3072, 4096], '4:3': [4096, 3072], '9:16': [2304, 4096], '16:9': [4096, 2304] });
 const MAX_BATCH_SIZE = 24;
-const QWEN_POLL_INTERVAL = 8000;
+const QWEN_POLL_INTERVAL = 10000;
+const QWEN_SUBMISSION_WINDOW_MS = 60000;
 const QWEN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
@@ -495,6 +496,38 @@ function batchFailedCount() { return state.batch.results.filter((item) => item.s
 function batchDelayedCount() { return state.batch.results.filter((item) => item.status === 'delayed').length; }
 function batchSettledCount() { return batchReadyCount() + batchFailedCount() + batchDelayedCount(); }
 function batchProgress() { return state.batch.results.length ? Math.round((batchSettledCount() / state.batch.results.length) * 100) : 0; }
+function syncResultAsset(result) {
+  if (!result?.image || result.status !== 'ready') return null;
+  const existing = state.savedAssets.find((asset) => asset.id === result.assetId || asset.sourceResultId === result.id);
+  const reviewLabel = result.review === 'pass' ? '验收通过' : result.review === 'fail' ? '需重做' : '待验收';
+  const asset = {
+    ...(existing || {}),
+    id: existing?.id || uid('asset'),
+    sourceResultId: result.id,
+    productId: result.productId,
+    image: result.image,
+    tags: [...new Set([...(result.tags || []).map((tag) => tag.split('：')[1] || tag), reviewLabel])],
+    prompt: result.prompt,
+    model: result.model,
+    provider: result.provider,
+    generationMode: result.generationMode,
+    evaluation: structuredClone(result.evaluation || Core.emptyEvaluation()),
+    review: result.review || 'pending',
+    demo: false,
+    batchId: state.batch.id,
+    createdAt: existing?.createdAt || '刚刚',
+  };
+  if (existing) Object.assign(existing, asset);
+  else state.savedAssets.unshift(asset);
+  result.assetId = asset.id;
+  const product = productById(result.productId);
+  if (product) {
+    product.references = productAssets(result.productId).length;
+    product.status = '已有素材';
+    product.updated = '刚刚';
+  }
+  return asset;
+}
 function elapsedMinutes(startedAt, finishedAt = 0) { return startedAt ? Math.max(1, Math.ceil(((finishedAt || Date.now()) - startedAt) / 60000)) : 0; }
 function batchStatusLabel() {
   if (state.batch.status === 'generating') return '生成中';
@@ -534,7 +567,7 @@ function renderTopbar() {
   const route = state.ui.route;
   $('#topbar-context').innerHTML = route === 'studio' ? `<div class="batch-context">${svgIcon('layers')}<span>${selectedProducts().length} 个产品 · ${plannedTotal()} 张计划素材</span></div>` : '';
   if (route === 'studio') {
-    $('#topbar-actions').innerHTML = `<button class="button button--secondary" data-action="open-product-picker">${svgIcon('plus')}选择产品</button>${state.batch.results.length ? `<button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}保存已验收素材</button>` : ''}`;
+    $('#topbar-actions').innerHTML = `<button class="button button--secondary" data-action="open-product-picker">${svgIcon('plus')}选择产品</button>${state.batch.results.length ? `<button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}确认验收结果</button>` : ''}`;
   } else if (route === 'products') {
     $('#topbar-actions').innerHTML = `<button class="button button--primary" data-action="open-import">${svgIcon('upload')}导入产品</button>`;
   } else {
@@ -632,7 +665,7 @@ function renderResultGroups() {
       const ratio = /^\d+:\d+$/.test(item.ratio || '') ? item.ratio.replace(':', ' / ') : '4 / 3';
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 尺寸处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '正在提交' : item.remoteStatus === 'PENDING' ? '模型排队中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '等待提交' : item.status === 'submitting' ? '正在提交任务' : item.remoteStatus === 'PENDING' ? '模型排队中' : item.remoteStatus === 'RETRYING' ? '查询暂时失败 · 自动重试中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
@@ -673,6 +706,7 @@ function renderStudio() {
   const activeProvider = batchActive ? (state.batch.provider || 'qwen') : state.studio.provider;
   const activeProviderConfig = providerConfig(activeProvider);
   const durationValue = batchActive ? `${elapsedMinutes(state.batch.startedAtMs, state.batch.finishedAtMs)} 分钟` : estimatedDuration(total);
+  const submissionNote = batchRunning && state.batch.nextSubmissionAt ? `按平台限速等待下一组提交，已提交的图片仍在同步查询。` : '';
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
     ${renderStudioSettings(batchRunning)}
@@ -684,8 +718,8 @@ function renderStudio() {
   </div><aside class="run-panel" aria-label="生成计划与结果">
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
-    <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div><div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '已保存到产品库' : `保存 ${batchApprovedCount()} 张已验收素材`}</button><p>${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请生成后及时下载；' : 'OpenAI 图片保存在当前浏览器，请及时下载备份；'}只有完成交付验收的图片会写回 SKU，并保留完整提示词和评分。</p></div>` : ''}
+    <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div>${submissionNote ? `<p class="muted-copy">${escapeHtml(submissionNote)}</p>` : ''}<div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
+    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '验收已确认' : `确认 ${batchApprovedCount()} 张验收通过`}</button><p>每张成功图片会立即进入素材库，并随验收状态更新；${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请及时下载备份。' : 'OpenAI 图片请及时下载备份。'}</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -992,6 +1026,11 @@ function buildCombinations() {
 }
 
 function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+async function waitForSubmissionWindow(batchId, targetTime) {
+  while (activeGenerationId === batchId && Date.now() < targetTime) {
+    await sleep(Math.min(1000, targetTime - Date.now()));
+  }
+}
 
 async function apiJson(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -1106,6 +1145,11 @@ async function referenceImageForModel(product) {
 async function submitQwenResult(result) {
   const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
+  result.status = 'submitting';
+  result.submittedAt = Date.now();
+  result.remoteStatus = 'SUBMITTING';
+  result.error = '';
+  saveState(); render();
   const referenceImage = await referenceImageForModel(product);
   result.requestId ||= uid('request');
   const task = await apiJson('/api/qwen/generate', {
@@ -1116,7 +1160,6 @@ async function submitQwenResult(result) {
   result.taskId = task.taskId;
   result.model = task.model;
   result.status = 'loading';
-  result.submittedAt = Date.now();
   result.remoteStatus = task.taskStatus || 'PENDING';
   result.error = '';
 }
@@ -1141,19 +1184,30 @@ async function submitOpenAiResult(result) {
   result.completedAt = Date.now();
   result.remoteStatus = 'SUCCEEDED';
   result.error = '';
+  syncResultAsset(result);
 }
 
 async function submitQwenBatch(results, batchId) {
   const profile = generationProfile(state.batch.generationMode, 'qwen');
-  for (let offset = 0; offset < results.length && activeGenerationId === batchId; offset += profile.submitLimit) {
-    if (offset > 0) {
-      state.batch.nextSubmissionAt = Date.now() + 60000;
-      saveState(); render();
-      await sleep(60000);
+  let previousWindowStartedAt = 0;
+  state.batch.submissionComplete = false;
+  try {
+    for (let offset = 0; offset < results.length && activeGenerationId === batchId; offset += profile.submitLimit) {
+      if (offset > 0) {
+        state.batch.nextSubmissionAt = previousWindowStartedAt + QWEN_SUBMISSION_WINDOW_MS;
+        saveState(); render();
+        await waitForSubmissionWindow(batchId, state.batch.nextSubmissionAt);
+      }
+      if (activeGenerationId !== batchId) break;
+      state.batch.nextSubmissionAt = 0;
+      previousWindowStartedAt = Date.now();
+      const windowItems = results.slice(offset, offset + profile.submitLimit);
+      await runWithConcurrency(windowItems, Math.min(profile.concurrency, windowItems.length), submitQwenResult);
     }
+  } finally {
     state.batch.nextSubmissionAt = 0;
-    const windowItems = results.slice(offset, offset + profile.submitLimit);
-    await runWithConcurrency(windowItems, Math.min(profile.concurrency, windowItems.length), submitQwenResult);
+    state.batch.submissionComplete = true;
+    saveState(); render();
   }
 }
 
@@ -1196,38 +1250,85 @@ async function runWithConcurrency(items, concurrency, operation) {
 async function pollQwenBatch(batchId) {
   while (activeGenerationId === batchId) {
     const pending = state.batch.results.filter((item) => item.taskId && item.status === 'loading');
-    if (!pending.length) break;
-    await runWithConcurrency(pending, 4, async (item) => {
-      const task = await apiJson(`/api/qwen/tasks/${encodeURIComponent(item.taskId)}`);
-      item.submittedAt ||= Date.now();
-      item.remoteStatus = task.taskStatus;
-      if (task.taskStatus === 'SUCCEEDED') {
-        if (task.imageUrls?.length) {
-          item.image = task.imageUrls[0];
-          item.status = 'ready';
-          item.error = '';
-        } else {
-          item.status = 'failed';
-          item.error = '千问任务已完成，但响应中没有图片，请重试。';
+    const submissionPending = state.batch.submissionComplete === false || state.batch.results.some((item) => ['queued', 'submitting'].includes(item.status));
+    if (!pending.length) {
+      if (!submissionPending) break;
+      await sleep(500);
+      continue;
+    }
+    let cursor = 0;
+    async function queryWorker() {
+      while (cursor < pending.length && activeGenerationId === batchId) {
+        const item = pending[cursor];
+        cursor += 1;
+        try {
+          const task = await apiJson(`/api/qwen/tasks/${encodeURIComponent(item.taskId)}`);
+          item.submittedAt ||= Date.now();
+          item.remoteStatus = task.taskStatus;
+          item.pollFailures = 0;
+          item.lastPollError = '';
+          if (task.taskStatus === 'SUCCEEDED') {
+            if (task.imageUrls?.length) {
+              item.image = task.imageUrls[0];
+              item.status = 'ready';
+              item.completedAt = Date.now();
+              item.error = '';
+              syncResultAsset(item);
+            } else {
+              item.status = 'failed';
+              item.error = '千问任务已完成，但响应中没有图片，请重试。';
+              refundResultCredit(item);
+            }
+          } else if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(task.taskStatus)) {
+            item.status = 'failed';
+            item.error = task.error?.message || '模型未能完成这张图片，请重试。';
+            refundResultCredit(item);
+          } else if (Date.now() - item.submittedAt >= QWEN_TASK_TIMEOUT_MS) {
+            item.status = 'delayed';
+            item.error = '已等待 10 分钟，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
+          }
+        } catch (error) {
+          item.pollFailures = Number(item.pollFailures || 0) + 1;
+          item.lastPollError = error.message;
+          item.remoteStatus = 'RETRYING';
+          if (error.code === 'KEY_REQUIRED' || error.code === 'KEY_INVALID') {
+            item.status = 'delayed';
+            item.error = '密钥失效，原任务仍被保留。重新输入密钥后点击“查询结果”，不会重复提交或扣分。';
+            activeGenerationId = '';
+          } else if (Date.now() - (item.submittedAt || Date.now()) >= QWEN_TASK_TIMEOUT_MS) {
+            item.status = 'delayed';
+            item.error = `连续查询失败，原任务仍被保留：${error.message}。点击“查询结果”继续查看。`;
+          }
+        } finally {
+          saveState(); render();
         }
-      } else if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(task.taskStatus)) {
-        item.status = 'failed';
-        item.error = task.error?.message || '模型未能完成这张图片，请重试。';
-        refundResultCredit(item);
-      } else if (Date.now() - item.submittedAt >= QWEN_TASK_TIMEOUT_MS) {
-        item.status = 'delayed';
-        item.error = '已等待 10 分钟，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
       }
-    });
+    }
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, queryWorker));
     if (activeGenerationId !== batchId) break;
-    if (state.batch.results.some((item) => item.status === 'loading')) await sleep(QWEN_POLL_INTERVAL);
+    if (state.batch.results.some((item) => item.status === 'loading') || state.batch.submissionComplete === false) await sleep(QWEN_POLL_INTERVAL);
   }
   finishBatch(batchId);
 }
 
 function finishBatch(batchId) {
   if (state.batch.id !== batchId) return;
+  state.batch.results.forEach((item) => {
+    if (item.status === 'queued') {
+      item.status = 'failed';
+      item.error = '任务尚未提交，未产生模型任务，可直接重试。';
+      refundResultCredit(item);
+    } else if (item.status === 'submitting' && !item.taskId) {
+      item.status = 'failed';
+      item.error = '提交期间中断，未取得任务编号。请先核对模型平台记录，再决定是否重试。';
+    } else if (item.status === 'loading' && item.taskId) {
+      item.status = 'delayed';
+      item.error ||= '查询已暂停，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
+    }
+  });
   activeGenerationId = '';
+  state.batch.submissionComplete = true;
+  state.batch.nextSubmissionAt = 0;
   state.batch.finishedAtMs = Date.now();
   state.batch.status = batchDelayedCount() ? 'delayed' : batchReadyCount() ? 'ready' : 'failed';
   saveState(); render();
@@ -1268,14 +1369,16 @@ async function startBatchGeneration() {
   confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
   state.credits -= cost;
-  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, savedAt: '' };
+  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   saveState(); render();
   if (provider === 'openai') await submitOpenAiBatch(results, state.batch.id);
   else {
-    await submitQwenBatch(results, state.batch.id);
-    if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
+    await Promise.all([
+      submitQwenBatch(results, state.batch.id),
+      pollQwenBatch(state.batch.id),
+    ]);
   }
   } finally { generationStarting = false; syncPromptConfirmationControls(); }
 }
@@ -1295,6 +1398,7 @@ async function regenerateResult(id) {
   item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.requestId = uid('request'); item.error = ''; item.saved = false; item.review = 'pending'; item.evaluation = Core.emptyEvaluation(); item.creditRefunded = false;
   item.prompt ||= generationPrompt(item.productSnapshot || productById(item.productId), item.tags.filter((tag) => !tag.startsWith('模型：')), item.promptDetails, item.ratio);
   state.batch.provider = provider;
+  state.batch.submissionComplete = provider !== 'qwen';
   activeGenerationId = state.batch.id;
   saveState(); render();
   try {
@@ -1302,8 +1406,10 @@ async function regenerateResult(id) {
       await submitOpenAiResult(item);
       finishBatch(state.batch.id);
     } else {
-      await submitQwenResult(item);
-      await pollQwenBatch(state.batch.id);
+      try { await submitQwenResult(item); }
+      finally { state.batch.submissionComplete = true; }
+      if (activeGenerationId === state.batch.id) await pollQwenBatch(state.batch.id);
+      else finishBatch(state.batch.id);
     }
     if (item.status === 'ready') showToast('单张素材已更新', '其他结果保持不变，请及时下载。', 'refresh');
   } catch (error) {
@@ -1323,6 +1429,7 @@ async function checkExistingResult(id) {
   item.status = 'loading';
   item.submittedAt = Date.now();
   state.batch.status = 'generating';
+  state.batch.submissionComplete = true;
   state.batch.finishedAtMs = 0;
   activeGenerationId = state.batch.id;
   saveState(); render();
@@ -1332,8 +1439,11 @@ async function checkExistingResult(id) {
 async function resumePendingBatch() {
   if (state.batch.status !== 'generating') return;
   state.batch.startedAtMs ||= Date.now();
-  const interrupted = state.batch.results.filter((item) => ['queued', 'loading'].includes(item.status) && !item.taskId);
-  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在请求期间中断，未取得可查询任务编号。原请求可能已计费；请先检查平台记录，再决定是否重新生成。'; });
+  state.batch.submissionComplete = true;
+  const neverSubmitted = state.batch.results.filter((item) => item.status === 'queued' && !item.taskId);
+  neverSubmitted.forEach((item) => { item.status = 'failed'; item.error = '页面关闭前任务尚未提交，可直接重试。'; refundResultCredit(item); });
+  const interrupted = state.batch.results.filter((item) => ['submitting', 'loading'].includes(item.status) && !item.taskId);
+  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在提交期间中断，未取得可查询任务编号。原请求可能已计费；请先检查平台记录，再决定是否重新生成。'; });
   const pending = state.batch.results.filter((item) => item.status === 'loading' && item.taskId);
   if (!pending.length) {
     state.batch.finishedAtMs ||= Date.now();
@@ -1360,11 +1470,11 @@ function saveBatch() {
   if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后归档，已完成的单张图片可先下载。', 'info'); return; }
   const unsaved = state.batch.results.filter((item) => item.status === 'ready' && item.review === 'pass' && !item.saved);
   if (!unsaved.length) { showToast('没有可保存的素材', '请先展开“交付验收”，完成结构、地域、景别、缺陷和交付检查。', 'info'); return; }
-  unsaved.forEach((result) => { state.savedAssets.unshift({ id: uid('asset'), productId: result.productId, image: result.image, tags: result.tags.map((tag) => tag.split('：')[1] || tag), prompt: result.prompt, model: result.model, evaluation: structuredClone(result.evaluation), review: result.review, demo: false, batchId: state.batch.id, createdAt: '刚刚' }); result.saved = true; });
+  unsaved.forEach((result) => { syncResultAsset(result); result.saved = true; });
   new Set(unsaved.map((item) => item.productId)).forEach((productId) => { const product = productById(productId); if (product) { product.references = productAssets(productId).length; product.versions += 1; product.status = '已有素材'; product.updated = '刚刚'; } });
   state.batch.status = state.batch.results.some((item) => item.status === 'ready' && !item.saved) ? 'ready' : 'saved'; state.batch.savedAt = nowLabel();
   state.projects.unshift({ id: uid('project'), name: `${new Set(state.batch.results.map((item) => item.productId)).size} 个 SKU 批量素材`, type: '批量创作', image: state.batch.results.find((item) => item.status === 'ready')?.image || RESULT_IMAGES[0], updated: '刚刚' });
-  saveState(); render(); showToast('素材已归档', `${unsaved.length} 张图片已回写到对应 SKU。`, 'folder');
+  saveState(); render(); showToast('验收结果已确认', `${unsaved.length} 张图片已标记为验收通过，素材库记录已更新。`, 'folder');
 }
 
 function upscaleImageTo4K(source, ratio = '4:3') {
@@ -1409,6 +1519,7 @@ async function generate4KResult(sourceId) {
   try {
     task.image = await upscaleImageTo4K(source.image, source.ratio);
     task.status = 'ready'; task.completedAt = Date.now(); task.remoteStatus = 'SUCCEEDED';
+    syncResultAsset(task);
     saveState(); render(); showToast('4K 尺寸版已完成', `${width} × ${height}，属于插值导出，不增加模型细节，也不扣积分。`, 'sparkles');
   } catch (error) {
     task.status = 'failed'; task.error = error.message;
@@ -1654,6 +1765,7 @@ document.addEventListener('change', (event) => {
       item.evaluation = { ...Core.emptyEvaluation(), ...(item.evaluation || {}) };
       item.evaluation[event.target.dataset.field] = event.target.dataset.field === 'structure' ? Number(event.target.value) : event.target.value;
       item.review = Core.deriveReview(item.evaluation);
+      syncResultAsset(item);
       saveState(); render();
     }
     return;
