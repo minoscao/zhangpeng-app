@@ -53,6 +53,23 @@
 .comparison-prompt { margin: 0; max-height: 260px; overflow: auto; padding: 12px; color: var(--ink-800); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comparison-section > .button { justify-self: start; min-height: 44px; }
 @media (max-width: 760px) { .comparison-model-list li { grid-template-columns: repeat(2, minmax(0, 1fr)); } .comparison-model-list small { grid-column: 1 / -1; } .comparison-section > .button { width: 100%; } }
+.inline-final-prompt { display: grid; gap: 10px; margin-top: 4px; padding: 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-soft); min-width: 0; }
+.final-prompt-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.final-prompt-heading > div { min-width: 0; }
+.final-prompt-heading h4 { color: var(--ink-950); font-size: 16px; }
+.final-prompt-heading p { margin-top: 4px; }
+.final-prompt-badge { flex: 0 0 auto; padding: 4px 9px; color: var(--amber); background: var(--amber-bg); border-radius: 999px; font-size: 12px; font-weight: 800; }
+.final-prompt-badge.is-confirmed { color: var(--green); background: var(--green-bg); }
+.inline-final-prompt label { color: var(--ink-800); font-size: 13px; font-weight: 700; }
+.inline-final-prompt .select-control { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; }
+.inline-final-prompt .review-current-recipe { color: var(--ink-800); overflow-wrap: anywhere; }
+.inline-final-prompt textarea { width: 100%; min-height: 300px; margin: 0; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink-950); background: var(--surface); font: inherit; font-size: 14px; line-height: 1.7; resize: vertical; }
+.inline-final-prompt textarea:focus { border-color: var(--purple-600); outline: 3px solid color-mix(in srgb, var(--purple-100) 78%, transparent); }
+.inline-final-prompt .field-error { color: var(--red); }
+.inline-prompt-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; }
+.inline-prompt-confirm p { color: var(--ink-600); }
+.inline-prompt-confirm .button { flex: 0 0 auto; min-height: 44px; }
+@media (max-width: 760px) { .inline-final-prompt { padding: 14px; } .inline-final-prompt textarea, .inline-final-prompt select { font-size: 16px; } .inline-prompt-confirm { align-items: stretch; flex-direction: column; } .inline-prompt-confirm .button { width: 100%; } }
 .final-prompt-review { display: grid; gap: 12px; margin-top: 20px; text-align: left; min-width: 0; }
 .final-prompt-review h3 { margin: 0; font-size: 16px; }
 .final-prompt-review p { margin: 0; color: var(--ink-600); font-size: 13px; }

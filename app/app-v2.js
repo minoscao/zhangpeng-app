@@ -603,7 +603,8 @@ function renderComparisonSection(batchRunning) {
   const profiles = Object.values(provider.profiles);
   const product = selectedProducts()[0];
   const combo = buildCombinations()[0];
-  return `<section class="comparison-section" aria-labelledby="comparison-title"><div class="comparison-heading"><h3 id="comparison-title">小样模型对比</h3><span>${profiles.length} 张对比图 · ${profiles.length * CREDIT_PER_IMAGE} 积分</span></div><p>只取首个 SKU 和首个组合，各模型配置生成一张，共用同一提示词。配置差异直接列在下面。</p><ul class="comparison-model-list" aria-label="参与对比的模型配置">${profiles.map((profile) => `<li><strong>${escapeHtml(profile.name)}</strong><span>${escapeHtml(profile.model)}</span><small>${escapeHtml(profile.detail)} · 1 张 / ${CREDIT_PER_IMAGE} 积分</small></li>`).join('')}</ul>${product ? `<dl class="comparison-context"><div><dt>参考产品</dt><dd>${escapeHtml(product.sku)} · ${escapeHtml(product.name)}</dd></div><div><dt>首个组合</dt><dd>${escapeHtml(combo.tags.join(' / ') || '默认配方')}</dd></div></dl><h4>对比共用提示词</h4><pre class="comparison-prompt">${escapeHtml((hasConfirmedPromptReview(true) ? confirmedPromptReviews.comparison.entries[0].prompt : generationPrompt(product, combo.tags, combo.promptDetails, combo.ratio)))}</pre>` : '<p class="comparison-empty">先选择参考产品，即可查看对比组合和实际提示词。</p>'}<p class="comparison-note">模型、质量及扩写配置可能不同，属于同配方成片对比。API 平台另按实际请求计费；查看此区不会调用生图或扣分。</p></section>`;
+  const promptEditor = product ? renderInlineFinalPrompt(batchRunning) : '<p class="comparison-empty">先选择参考产品，即可查看并确认最终提示词。</p>';
+  return `<section class="comparison-section" aria-labelledby="comparison-title"><div class="comparison-heading"><h3 id="comparison-title">小样模型对比</h3><span>${profiles.length} 张对比图 · ${profiles.length * CREDIT_PER_IMAGE} 积分</span></div><p>只取首个 SKU 和首个组合，各模型配置生成一张，共用同一提示词。配置差异直接列在下面。</p><ul class="comparison-model-list" aria-label="参与对比的模型配置">${profiles.map((profile) => `<li><strong>${escapeHtml(profile.name)}</strong><span>${escapeHtml(profile.model)}</span><small>${escapeHtml(profile.detail)} · 1 张 / ${CREDIT_PER_IMAGE} 积分</small></li>`).join('')}</ul>${product ? `<dl class="comparison-context"><div><dt>参考产品</dt><dd>${escapeHtml(product.sku)} · ${escapeHtml(product.name)}</dd></div><div><dt>首个组合</dt><dd>${escapeHtml(combo.tags.join(' / ') || '默认配方')}</dd></div></dl>` : ''}${promptEditor}<p class="comparison-note">模型、质量及扩写配置可能不同，属于同配方成片对比。API 平台另按实际请求计费；查看和确认提示词不会调用生图或扣分。</p></section>`;
 }
 
 function renderStudio() {
@@ -716,12 +717,12 @@ function hasConfirmedPromptReview(forComparison = false) {
 }
 
 function promptConfirmationText(forComparison = false) {
-  return hasConfirmedPromptReview(forComparison) ? '提示词已确认，可以生成；修改选项后需重新确认。' : '请先预览并确认提示词，再点击生成。';
+  return hasConfirmedPromptReview(forComparison) ? '最终提示词已确认，可以生成；修改后需重新确认。' : '请先在上方确认最终提示词，再生成素材。';
 }
 
 function renderGenerationControls(forComparison, blocked) {
   const mode = forComparison ? 'comparison' : 'batch';
-  return `<div class="generation-controls"><p data-confirmation-status="${mode}" role="status">${promptConfirmationText(forComparison)}</p><div class="generation-control-actions"><button class="button button--secondary" data-action="review-${mode}" ${blocked ? 'disabled' : ''}>预览并确认${forComparison ? '对比' : ''}提示词</button><button class="button button--primary" data-action="generate-${mode}" ${blocked || !hasConfirmedPromptReview(forComparison) ? 'disabled' : ''}>${svgIcon('sparkles')}${forComparison ? '生成对比图' : '生成素材'}</button></div></div>`;
+  return `<div class="generation-controls"><p data-confirmation-status="${mode}" role="status">${promptConfirmationText(forComparison)}</p><div class="generation-control-actions"><button class="button button--primary" data-action="generate-${mode}" ${blocked || !hasConfirmedPromptReview(forComparison) ? 'disabled' : ''}>${svgIcon('sparkles')}${forComparison ? '生成对比图' : '生成素材'}</button></div></div>`;
 }
 
 function syncPromptConfirmationControls() {
@@ -732,23 +733,31 @@ function syncPromptConfirmationControls() {
     const status = document.querySelector(`[data-confirmation-status="${mode}"]`);
     if (status) status.textContent = promptConfirmationText(comparison);
   }
+  const inlineStatus = document.querySelector('[data-inline-prompt-status]');
+  if (inlineStatus) inlineStatus.textContent = promptConfirmationText(false);
+  const inlineBadge = document.querySelector('[data-inline-prompt-badge]');
+  if (inlineBadge) { inlineBadge.textContent = hasConfirmedPromptReview(false) ? '已确认' : '待确认'; inlineBadge.classList.toggle('is-confirmed', hasConfirmedPromptReview(false)); }
+  const inlineButton = document.querySelector('[data-action="confirm-inline-prompts"]');
+  if (inlineButton) inlineButton.disabled = generationStarting || state.batch.status === 'generating' || !promptReview?.entries.length;
 }
 
-function validatePromptReview() {
+function validatePromptReview(inline = false) {
   const invalidIndex = promptReview.entries.findIndex((entry) => !entry.prompt.trim() || entry.prompt.length > promptReviewLimit());
   if (invalidIndex < 0) return promptReview.entries.length > 0;
-  promptReviewIndex = invalidIndex; promptReviewEditing = true; promptReviewDraft = promptReview.entries[invalidIndex].prompt;
-  promptReviewError = `当前模型提示词上限为 ${promptReviewLimit()} 字，请精简后保存；尚未提交或扣分。`;
-  state.ui.confirmBatch = true; render(); $('#final-prompt-text')?.focus(); return false;
+  promptReviewIndex = invalidIndex; promptReviewEditing = !inline; promptReviewDraft = promptReview.entries[invalidIndex].prompt;
+  promptReviewError = promptReview.entries[invalidIndex].prompt.trim() ? `当前模型提示词上限为 ${promptReviewLimit()} 字，请精简后确认；尚未提交或扣分。` : '最终提示词不能为空，请填写后再确认。';
+  if (!inline) state.ui.confirmBatch = true;
+  render(); $('#final-prompt-text')?.focus(); return false;
 }
 
-function confirmCurrentPromptReview() {
-  if (promptReviewEditing || !promptReview) return;
+function confirmCurrentPromptReview(inline = false) {
+  if ((!inline && promptReviewEditing) || !promptReview) return;
   if (promptReview.fingerprint !== reviewFingerprint()) { preparePromptReview(); render(); showToast('选项已变更', '请重新检查并确认提示词。'); return; }
-  if (!validatePromptReview()) return;
+  if (!validatePromptReview(inline)) return;
   confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch'] = structuredClone(promptReview);
-  closeOverlay();
-  showToast('提示词已确认', '未调用生图或扣分，现在可以在工作台点击生成。');
+  if (inline) { promptReviewError = ''; render(); requestAnimationFrame(() => $('[data-action="generate-batch"]')?.focus()); }
+  else closeOverlay();
+  showToast('最终提示词已确认', '未调用生图或扣分，现在可以在最下方点击生成素材。');
 }
 
 function promptReviewLimit() { return state.studio.provider === 'qwen' && (state.studio.generationMode === 'wan' || comparisonRequested) ? 2000 : 6000; }
@@ -758,6 +767,38 @@ function preparePromptReview() {
   const products = comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts();
   promptReview = hasConfirmedPromptReview(comparisonRequested) ? structuredClone(confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch']) : { fingerprint: reviewFingerprint(), entries: products.flatMap((product) => combos.map((combo, comboIndex) => ({ key: `${product.id}:${comboIndex}`, label: `${product.sku} · ${combo.tags.join(' / ') || '默认配方'}`, prompt: generationPrompt(product, combo.tags, combo.promptDetails, combo.ratio) }))) };
   promptReviewIndex = 0; promptReviewEditing = false; promptReviewDraft = ''; promptReviewError = '';
+}
+
+function ensureInlinePromptReview() {
+  const previousComparison = comparisonRequested;
+  comparisonRequested = false;
+  if (!promptReview || promptReview.fingerprint !== reviewFingerprint(false)) preparePromptReview();
+  promptReviewIndex = Math.max(0, Math.min(promptReviewIndex, Math.max(0, promptReview.entries.length - 1)));
+  comparisonRequested = previousComparison;
+}
+
+function refreshInlinePromptReview() {
+  const previousIndex = promptReviewIndex;
+  const previousComparison = comparisonRequested;
+  comparisonRequested = false;
+  confirmedPromptReviews.batch = null;
+  preparePromptReview();
+  promptReviewIndex = Math.max(0, Math.min(previousIndex, Math.max(0, promptReview.entries.length - 1)));
+  comparisonRequested = previousComparison;
+  const entry = promptReview.entries[promptReviewIndex];
+  const textarea = $('#final-prompt-text');
+  if (textarea && entry) textarea.value = entry.prompt;
+  const recipe = $('.review-current-recipe');
+  if (recipe && entry) recipe.textContent = entry.label;
+  syncPromptConfirmationControls();
+}
+
+function renderInlineFinalPrompt(batchRunning) {
+  ensureInlinePromptReview();
+  const entry = promptReview.entries[promptReviewIndex];
+  if (!entry) return '<p class="comparison-empty">当前没有可确认的提示词配方。</p>';
+  const confirmed = hasConfirmedPromptReview(false);
+  return `<div class="inline-final-prompt"><div class="final-prompt-heading"><div><h4>最终提示词</h4><p>汇总上方所有选项和要求。可切换检查每个产品与配方，并直接修改最终内容。</p></div><span class="final-prompt-badge ${confirmed ? 'is-confirmed' : ''}" data-inline-prompt-badge>${confirmed ? '已确认' : '待确认'}</span></div><label for="prompt-review-entry">当前配方</label><select id="prompt-review-entry" class="select-control" ${batchRunning ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p><label for="final-prompt-text">最终提示词 · 可直接修改</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), entry.prompt.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}" aria-invalid="${promptReviewError ? 'true' : 'false'}" ${batchRunning ? 'disabled' : ''}>${escapeHtml(entry.prompt)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<p id="prompt-review-help">修改只作用于当前配方；切换后可逐一检查。确认不会调用生图或扣分，当前模型上限为 ${promptReviewLimit()} 字。</p><div class="inline-prompt-confirm"><p data-inline-prompt-status role="status">${promptConfirmationText(false)}</p><button class="button button--primary" data-action="confirm-inline-prompts" ${batchRunning || generationStarting ? 'disabled' : ''}>${svgIcon('check')}确认最终提示词</button></div></div>`;
 }
 
 function reviewedPrompt(product, combo, comboIndex) {
@@ -1148,7 +1189,7 @@ function finishBatch(batchId) {
 async function startBatchGeneration() {
   if (generationStarting || promptReviewEditing || state.batch.status === 'generating' || activeGenerationId) return;
   const requestedComparison = comparisonRequested;
-  if (!hasConfirmedPromptReview(requestedComparison)) { syncPromptConfirmationControls(); showToast('请先确认提示词', '在预览窗口确认后，才能点击生成。'); return; }
+  if (!hasConfirmedPromptReview(requestedComparison)) { syncPromptConfirmationControls(); showToast('请先确认最终提示词', '请在上方“最终提示词”区域检查并确认后再生成。'); return; }
   const approvedReview = confirmedPromptReviews[requestedComparison ? 'comparison' : 'batch'];
   promptReview = structuredClone(approvedReview);
   if (!validatePromptReview()) return;
@@ -1440,6 +1481,13 @@ document.addEventListener('click', async (event) => {
     if (!selectedProducts().length) { showToast('请先选择产品', '至少选择一个 SKU 才能开始生成。', 'box'); return; }
     preparePromptReview(); rememberFocus(); state.ui.confirmBatch = true; render(); focusOverlay();
   }
+  if (action === 'confirm-inline-prompts') {
+    comparisonRequested = false;
+    promptReviewEditing = false;
+    promptReviewDraft = '';
+    confirmCurrentPromptReview(true);
+    return;
+  }
   if (action === 'confirm-prompts') confirmCurrentPromptReview();
   if (action === 'generate-batch' || action === 'generate-comparison') {
     comparisonRequested = action === 'generate-comparison';
@@ -1499,12 +1547,20 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
-  if (event.target.id === 'studio-other-requirements') { state.studio.otherRequirements = event.target.value; saveState(); syncPromptConfirmationControls(); const product = selectedProducts()[0]; const combo = buildCombinations()[0]; const preview = $('.comparison-prompt'); if (preview && product) preview.textContent = generationPrompt(product, combo.tags, combo.promptDetails, combo.ratio); }
+  if (event.target.id === 'studio-other-requirements') { state.studio.otherRequirements = event.target.value; saveState(); refreshInlinePromptReview(); }
   if (event.target.id === 'style-prompt-text') { stylePromptDraft = event.target.value; stylePromptError = ''; }
-  if (event.target.id === 'final-prompt-text') { promptReviewDraft = event.target.value; }
+  if (event.target.id === 'final-prompt-text') {
+    promptReviewDraft = event.target.value;
+    if (!promptReviewEditing && promptReview?.entries[promptReviewIndex]) {
+      promptReview.entries[promptReviewIndex].prompt = event.target.value;
+      promptReviewError = '';
+      confirmedPromptReviews.batch = null;
+      syncPromptConfirmationControls();
+    }
+  }
   if (event.target.id === 'city-name') { cityDraft = event.target.value; cityPlannerError = ''; }
-  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); syncPromptConfirmationControls(); } }
-  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); syncPromptConfirmationControls(); }
+  if (event.target.dataset.regionPrompt) { const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.regionPrompt); if (option) { option.prompt = event.target.value; saveState(); refreshInlinePromptReview(); } }
+  if (event.target.id === 'public-prompt-content') { const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0]; template.prompt = event.target.value; saveState(); refreshInlinePromptReview(); }
   if (event.target.id === 'product-search') {
     state.ui.productSearch = event.target.value;
     const position = event.target.selectionStart;
@@ -1514,7 +1570,7 @@ document.addEventListener('input', (event) => {
 });
 
 document.addEventListener('change', (event) => {
-  if (event.target.id === 'prompt-review-entry' && !promptReviewEditing) { const index = Number(event.target.value); if (Number.isInteger(index) && promptReview?.entries[index]) { promptReviewIndex = index; render(); $('#prompt-review-entry')?.focus(); } return; }
+  if (event.target.id === 'prompt-review-entry' && !promptReviewEditing) { const index = Number(event.target.value); if (Number.isInteger(index) && promptReview?.entries[index]) { promptReviewIndex = index; promptReviewError = ''; render(); $('#prompt-review-entry')?.focus(); } return; }
   if (event.target.id === 'studio-provider') { setStudioProvider(event.target.value); return; }
   if (event.target.id === 'studio-quality') { setStudioQuality(event.target.value); return; }
   if (event.target.id === 'public-prompt-template') { state.studio.publicPromptId = event.target.value; saveState(); render(); }
