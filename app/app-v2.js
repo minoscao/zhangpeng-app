@@ -674,7 +674,7 @@ function renderResultGroups() {
       const ratio = /^\d+:\d+$/.test(item.ratio || '') ? item.ratio.replace(':', ' / ') : '4 / 3';
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 尺寸处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '等待提交' : item.status === 'submitting' ? '正在提交任务' : item.remoteStatus === 'PENDING' ? '模型排队中' : item.remoteStatus === 'RETRYING' ? '查询暂时失败 · 自动重试中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '等待提交' : item.status === 'submitting' ? '正在提交任务' : item.remoteStatus === 'VERIFYING' ? '自动检查人数与互动' : item.remoteStatus === 'REPAIRING' ? '人物未达标 · 自动修复中' : item.remoteStatus === 'PENDING' ? '模型排队中' : item.remoteStatus === 'RETRYING' ? '查询暂时失败 · 自动重试中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
@@ -933,7 +933,7 @@ function renderConfirmDialog() {
   const total = plannedTotal();
   const profile = comparisonRequested ? { name: '同配方模型配置对比', model: Object.values(providerConfig().profiles).map((item) => item.model).join(' / ') } : generationProfile();
   const provider = providerConfig();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；${state.studio.provider === 'qwen' ? '含人物约束的千问图片会追加一次视觉验收，不合格时自动修复一次；视觉验收和修复由千问按实际调用计费，但不另扣软件积分。' : ''}同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
 }
 
 function renderApiKeyDialog() {
@@ -1114,6 +1114,101 @@ function generationPrompt(product, tags, promptDetails = [], ratio = state.studi
   return Core.compilePrompt(state, product, tags, promptDetails, ratio);
 }
 
+function expectedPeopleForPrompt(prompt) {
+  if (String(prompt || '').includes('【人物数量硬约束｜1人】')) return 1;
+  if (String(prompt || '').includes('【人物数量硬约束｜0人】')) return 0;
+  return null;
+}
+
+function qwenRepairPrompt(result, expectedPeople, inspection) {
+  const issues = Array.isArray(inspection?.issues) && inspection.issues.length ? inspection.issues.join('；') : '人物数量或互动关系不合格';
+  const originalLimit = result.generationMode === 'wan' ? 900 : 3600;
+  const repairRule = expectedPeople === 1
+    ? '【人物数量硬约束｜1人】先删除输入图片中的全部现有人物，再重新只放置 1 名儿童，不得保留或复制原人物。【人物互动硬约束｜必须可见】唯一儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外；一只手明确接触并轻扶软质门帘边缘，视线朝向帐篷内部。禁止第二个人、远景人影、人物倒影、局部肢体；禁止站在帐篷旁边摆拍、远离、背对或忽视帐篷。手不得穿透面料，人物与入口的前后遮挡必须正确。'
+    : '【人物数量硬约束｜0人】删除输入图片中的所有儿童、成人、路人、远景人影、人物剪影、局部肢体、人物倒影以及照片或屏幕中的人物；自然修复被删除区域，最终人物总数严格等于 0。';
+  return `【自动质检修复任务｜直接编辑输入图片】质检发现：${issues}。${repairRule}\n保持输入图片中的帐篷结构、面料、构图、光线、地域背景和地标不变，不重新设计帐篷，不增加道具、文字、商标或水印。\n原始任务关键要求：\n${String(result.prompt || '').slice(0, originalLimit)}`;
+}
+
+async function inspectQwenResultImage(result, imageUrl, expectedPeople) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await apiJson('/api/qwen/inspect-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': uid('inspect') },
+        body: JSON.stringify({ imageUrl, expectedPeople }),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0 && !['KEY_REQUIRED', 'KEY_INVALID', 'INVALID_RESULT_IMAGE'].includes(error.code)) await sleep(3000);
+      else break;
+    }
+  }
+  throw lastError;
+}
+
+function finalizeQwenResult(result, imageUrl, inspection = null) {
+  result.tags = Array.isArray(result.tags) ? result.tags : [];
+  result.image = imageUrl;
+  result.status = 'ready';
+  result.completedAt = Date.now();
+  result.remoteStatus = 'SUCCEEDED';
+  result.error = '';
+  result.qualityCheck = inspection;
+  if (inspection) {
+    if (!result.tags.includes('人物自动验收通过')) result.tags.push('人物自动验收通过');
+    if (result.autoRepairAttempts && !result.tags.includes('自动修复 1 次')) result.tags.push('自动修复 1 次');
+  }
+  syncResultAsset(result);
+}
+
+async function verifyOrRepairQwenResult(result, imageUrl) {
+  const expectedPeople = expectedPeopleForPrompt(result.prompt);
+  if (expectedPeople === null) { finalizeQwenResult(result, imageUrl); return; }
+  result.remoteStatus = 'VERIFYING';
+  result.provisionalImage = imageUrl;
+  result.error = '';
+  saveState(); render();
+  let inspection;
+  try {
+    inspection = await inspectQwenResultImage(result, imageUrl, expectedPeople);
+  } catch (error) {
+    result.status = 'failed';
+    result.remoteStatus = 'QA_FAILED';
+    result.error = `人物自动验收未完成，系统没有交付未经检查的图片：${error.message}`;
+    result.image = '';
+    refundResultCredit(result);
+    return;
+  }
+  result.qualityCheck = inspection;
+  if (inspection.pass) { finalizeQwenResult(result, imageUrl, inspection); return; }
+  if (Number(result.autoRepairAttempts || 0) < 1) {
+    const originalTaskId = result.taskId;
+    result.remoteStatus = 'REPAIRING';
+    result.error = `自动验收发现：${inspection.issues?.join('；') || '人物数量或互动关系不合格'}，正在自动修复。`;
+    saveState(); render();
+    const repair = await apiJson('/api/qwen/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': uid('repair') },
+      body: JSON.stringify({ prompt: qwenRepairPrompt(result, expectedPeople, inspection), repairImageUrl: imageUrl, ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    });
+    result.autoRepairAttempts = 1;
+    result.previousTaskIds = [...(result.previousTaskIds || []), originalTaskId].filter(Boolean);
+    result.taskId = repair.taskId;
+    result.model = repair.model;
+    result.status = 'loading';
+    result.submittedAt = Date.now();
+    result.remoteStatus = 'REPAIRING';
+    result.image = '';
+    return;
+  }
+  result.status = 'failed';
+  result.remoteStatus = 'QA_FAILED';
+  result.error = `自动修复后仍未通过人物验收：${inspection.issues?.join('；') || '人数或互动关系不合格'}。未进入素材库，请点击重试。`;
+  result.image = '';
+  refundResultCredit(result);
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1278,11 +1373,7 @@ async function pollQwenBatch(batchId) {
           item.lastPollError = '';
           if (task.taskStatus === 'SUCCEEDED') {
             if (task.imageUrls?.length) {
-              item.image = task.imageUrls[0];
-              item.status = 'ready';
-              item.completedAt = Date.now();
-              item.error = '';
-              syncResultAsset(item);
+              await verifyOrRepairQwenResult(item, task.imageUrls[0]);
             } else {
               item.status = 'failed';
               item.error = '千问任务已完成，但响应中没有图片，请重试。';
@@ -1373,7 +1464,7 @@ async function startBatchGeneration() {
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
   const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
   const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
-  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false }))));
+  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false, autoRepairAttempts: 0, qualityCheck: null }))));
   if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
   confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
@@ -1405,7 +1496,7 @@ async function regenerateResult(id) {
   state.credits -= CREDIT_PER_IMAGE;
   item.previousAttempts ||= [];
   item.previousAttempts.push({ prompt: item.prompt, model: item.model, review: item.review, error: item.error });
-  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.requestId = uid('request'); item.error = ''; item.saved = false; item.review = 'pending'; item.evaluation = Core.emptyEvaluation(); item.creditRefunded = false;
+  item.provider = provider; item.generationMode = state.studio.generationMode; item.status = 'queued'; item.taskId = ''; item.requestId = uid('request'); item.error = ''; item.saved = false; item.review = 'pending'; item.evaluation = Core.emptyEvaluation(); item.creditRefunded = false; item.autoRepairAttempts = 0; item.qualityCheck = null; item.provisionalImage = '';
   item.prompt ||= generationPrompt(item.productSnapshot || productById(item.productId), item.tags.filter((tag) => !tag.startsWith('模型：')), item.promptDetails, item.ratio);
   state.batch.provider = provider;
   state.batch.submissionComplete = provider !== 'qwen';

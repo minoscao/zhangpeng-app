@@ -128,6 +128,47 @@ assert.equal(run('state.savedAssets.length'), 1);
 assert.equal(run('state.savedAssets[0].review'), 'pass');
 assert.match(run('state.savedAssets[0].tags.join(" ")'), /验收通过/);
 
+run(`state = structuredClone(seedState); state.savedAssets = [];
+  state.batch = {id: 'B-AUTO-QA', status: 'generating', provider: 'qwen', generationMode: 'quality', results: [{
+    id: 'result-auto-qa', productId: 'p-1', image: '', tags: [], prompt: '【人物数量硬约束｜1人】\\n【人物互动硬约束｜必须可见】', ratio: '4:3', generationMode: 'quality', model: 'qwen-image-3.0-pro', status: 'loading', taskId: 'task-original', remoteStatus: 'SUCCEEDED', autoRepairAttempts: 0, creditRefunded: false, evaluation: Core.emptyEvaluation(), review: 'pending'
+  }]};
+  let autoQaCalls = 0;
+  apiJson = async (path, options) => {
+    if (path === '/api/qwen/inspect-image') {
+      autoQaCalls += 1;
+      return autoQaCalls === 1
+        ? {pass:false, personCount:2, childCount:2, interactionVisible:false, issues:['出现第二名儿童','人物没有接触帐篷']}
+        : {pass:true, personCount:1, childCount:1, atTentEntrance:true, touchingTent:true, interactionVisible:true, extraPersonVisible:false, issues:[]};
+    }
+    if (path === '/api/qwen/generate') {
+      const body = JSON.parse(options.body);
+      if (!body.repairImageUrl || !body.prompt.includes('先删除输入图片中的全部现有人物')) throw new Error('修复请求缺少目标图片或硬约束');
+      return {taskId:'task-repair', model:'qwen-image-3.0-pro'};
+    }
+    throw new Error('unexpected path');
+  };`);
+await run("verifyOrRepairQwenResult(state.batch.results[0], 'https://example.com/first.jpg')");
+assert.equal(run('state.batch.results[0].status'), 'loading');
+assert.equal(run('state.batch.results[0].taskId'), 'task-repair');
+assert.equal(run('state.batch.results[0].autoRepairAttempts'), 1);
+assert.equal(run('state.savedAssets.length'), 0);
+assert.match(run('renderResultGroups()'), /人物未达标 · 自动修复中/);
+await run("verifyOrRepairQwenResult(state.batch.results[0], 'https://example.com/repaired.jpg')");
+assert.equal(run('state.batch.results[0].status'), 'ready');
+assert.equal(run('state.batch.results[0].image'), 'https://example.com/repaired.jpg');
+assert.match(run('state.batch.results[0].tags.join(" ")'), /人物自动验收通过/);
+assert.match(run('state.batch.results[0].tags.join(" ")'), /自动修复 1 次/);
+assert.equal(run('state.savedAssets.length'), 1);
+run(`state.savedAssets = []; state.credits = 10; state.batch.results[0] = {
+  id: 'result-auto-qa-fail', productId: 'p-1', image: '', tags: [], prompt: '【人物数量硬约束｜1人】', ratio: '4:3', generationMode: 'quality', status: 'loading', taskId: 'task-repair-failed', remoteStatus: 'SUCCEEDED', autoRepairAttempts: 1, creditRefunded: false, evaluation: Core.emptyEvaluation(), review: 'pending'
+}; apiJson = async (path) => path === '/api/qwen/inspect-image' ? {pass:false, personCount:2, childCount:2, interactionVisible:false, issues:['仍然出现两个人']} : Promise.reject(new Error('unexpected path'));`);
+await run("verifyOrRepairQwenResult(state.batch.results[0], 'https://example.com/still-bad.jpg')");
+assert.equal(run('state.batch.results[0].status'), 'failed');
+assert.equal(run('state.batch.results[0].image'), '');
+assert.equal(run('state.savedAssets.length'), 0);
+assert.equal(run('state.credits'), 13);
+assert.match(run('state.batch.results[0].error'), /未进入素材库/);
+
 run(`state = structuredClone(seedState); state.credits = 100; state.batch = {id: 'B-STOP', status: 'generating', provider: 'qwen', submissionComplete: false, results: [
   {id:'queued', status:'queued', productId:'p-1', tags:[], creditRefunded:false},
   {id:'submitting', status:'submitting', productId:'p-1', tags:[], creditRefunded:false},

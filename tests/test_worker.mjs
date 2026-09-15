@@ -4,6 +4,7 @@ import worker from '../worker.js';
 const apiKey = 'sk-test-openai-1234567890';
 let editRequest;
 let cityRequest;
+let inspectionRequest;
 let wanRequest;
 const qwenRequests = [];
 
@@ -24,7 +25,12 @@ globalThis.fetch = async (input, init = {}) => {
     return Response.json({ data: [{ b64_json: 'aW1hZ2U=' }] });
   }
   if (url.endsWith('/chat/completions')) {
-    cityRequest = JSON.parse(init.body);
+    const request = JSON.parse(init.body);
+    if (request.model === 'qwen3-vl-flash') {
+      inspectionRequest = request;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ personCount: 2, childCount: 2, atTentEntrance: false, touchingTent: false, interactionVisible: false, extraPersonVisible: true, issues: ['出现第二名儿童', '人物没有接触帐篷'] }) } }] });
+    }
+    cityRequest = request;
     assert.ok(init.signal);
     return Response.json({ choices: [{ message: { content: '墨尔本城市背景：雅拉河水岸公园与 CBD 天际线；木屋方案采用维州木质庭院。' } }] });
   }
@@ -123,5 +129,37 @@ assert.match(qwenRequests.at(-1).parameters.negative_prompt, /额外人物/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物与帐篷无互动/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物在帐篷旁边摆拍/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /手穿透帐篷/);
+assert.match(qwenRequests.at(-1).input.messages[0].content.at(-1).text, /^【最高优先级｜先完成人物数量与互动/);
+
+const generatedImageUrl = 'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/output/generated.png';
+const inspectionResponse = await worker.fetch(new Request('https://app.example/api/qwen/inspect-image', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ imageUrl: generatedImageUrl, expectedPeople: 1 }),
+}), env);
+const inspection = await inspectionResponse.json();
+assert.equal(inspectionResponse.status, 200);
+assert.equal(inspection.pass, false);
+assert.equal(inspection.personCount, 2);
+assert.equal(inspection.interactionVisible, false);
+assert.equal(inspectionRequest.response_format.type, 'json_object');
+assert.equal(inspectionRequest.enable_thinking, false);
+assert.equal(inspectionRequest.messages[0].content[0].image_url.url, generatedImageUrl);
+
+const repairResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: '【人物数量硬约束｜1人】自动修复人物互动。', repairImageUrl: generatedImageUrl, generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.equal(repairResponse.status, 202);
+assert.equal(qwenRequests.at(-1).input.messages[0].content[0].image, generatedImageUrl);
+assert.match(qwenRequests.at(-1).input.messages[0].content[1].text, /输入参考图中的人物不是产品结构/);
+
+const invalidRepairResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: '【人物数量硬约束｜1人】自动修复人物互动。', repairImageUrl: 'https://example.com/untrusted.png', generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.equal(invalidRepairResponse.status, 400);
 
 console.log('Worker OpenAI integration tests passed.');

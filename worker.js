@@ -1,6 +1,7 @@
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const DASHSCOPE_MODELS_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const QWEN_VISION_MODEL = 'qwen3-vl-flash';
 const QWEN_GENERATION_PROFILES = Object.freeze({
   fast: Object.freeze({ model: 'qwen-image-3.0', enableThinking: false, promptExtend: false }),
   quality: Object.freeze({ model: 'qwen-image-3.0-pro', enableThinking: false, promptExtend: false }),
@@ -135,6 +136,25 @@ function validateReferenceImages(images, requestUrl) {
   });
 }
 
+function validateQwenResultImageUrl(value) {
+  if (typeof value !== 'string') throw new Error('INVALID_RESULT_IMAGE');
+  let imageUrl;
+  try { imageUrl = new URL(value); }
+  catch { throw new Error('INVALID_RESULT_IMAGE'); }
+  if (imageUrl.protocol !== 'https:' || !/(^|\.)aliyuncs\.com$/i.test(imageUrl.hostname)) throw new Error('INVALID_RESULT_IMAGE');
+  return imageUrl.href;
+}
+
+function prioritizePeoplePrompt(prompt, noPeopleRequired, onePersonRequired) {
+  const priority = onePersonRequired
+    ? '【最高优先级｜先完成人物数量与互动，再处理背景】输入参考图中的人物不是产品结构，必须先全部移除。最终画面重新只安排 1 名儿童：儿童坐在帐篷入口门槛，身体跨越篷内外，一只手与软质门帘发生清楚可见的真实接触，视线朝向帐篷内部。禁止出现第二个人，禁止站在帐篷旁边摆拍、远离、背对或忽视帐篷。若人数不等于 1 或接触关系不可见，结果即不合格。'
+    : noPeopleRequired
+      ? '【最高优先级｜严格无人】输入参考图中的人物不是产品结构，必须全部移除。最终画面人物总数严格等于 0，包括远景人影、局部肢体、倒影、照片或屏幕中的人物。'
+      : '';
+  if (!priority) return prompt;
+  return `${priority}\n${prompt}`.slice(0, MAX_PROMPT_LENGTH);
+}
+
 function upstreamErrorMessage(data, status) {
   const detail = data?.message || data?.error?.message || '';
   if (status === 429 || data?.code === 'Throttling') return '模型请求过于频繁，请稍后重试。';
@@ -194,14 +214,20 @@ async function createQwenTask(request, env, apiKey) {
     return jsonResponse({ error: { code: error.message, message: '参考图必须来自本站素材目录，最多 3 张且单张不超过 10MB。' } }, 400);
   }
 
-  const content = [...referenceImages.map((image) => ({ image })), { text: prompt }];
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
   const noPeopleRequired = prompt.includes('【人物数量硬约束｜0人】');
   const onePersonRequired = prompt.includes('【人物数量硬约束｜1人】');
+  let repairImageUrl = '';
+  if (body.repairImageUrl) {
+    try { repairImageUrl = validateQwenResultImageUrl(body.repairImageUrl); }
+    catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '自动修复只能使用刚刚由千问生成的有效图片。' } }, 400); }
+  }
+  const effectivePrompt = prioritizePeoplePrompt(prompt, noPeopleRequired, onePersonRequired);
+  const content = [...(repairImageUrl ? [{ image: repairImageUrl }] : referenceImages.map((image) => ({ image }))), { text: effectivePrompt }];
   const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
-  if (body.generationMode === 'wan' && !referenceImages.length) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '万相产品编辑需要至少一张参考产品图。' } }, 400);
+  if (body.generationMode === 'wan' && !referenceImages.length && !repairImageUrl) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '万相产品编辑需要至少一张参考产品图。' } }, 400);
   const parameters = {
     negative_prompt: [
       '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
@@ -244,6 +270,61 @@ async function createQwenTask(request, env, apiKey) {
     return jsonResponse({ error: { code: data?.code || 'QWEN_UPSTREAM_ERROR', message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 502);
   }
   return jsonResponse({ taskId: data.output.task_id, taskStatus: data.output.task_status || 'PENDING', model: profile.model }, 202);
+}
+
+function parseInspectionJson(value) {
+  const raw = String(value || '').replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('INVALID_INSPECTION');
+  return JSON.parse(match[0]);
+}
+
+async function inspectQwenImage(request, env, apiKey) {
+  let body;
+  try { body = await readJsonBody(request); }
+  catch { return jsonResponse({ error: { code: 'INVALID_JSON', message: '人物自动验收请求格式无效。' } }, 400); }
+  const expectedPeople = Number(body.expectedPeople);
+  if (![0, 1].includes(expectedPeople)) return jsonResponse({ error: { code: 'INVALID_EXPECTATION', message: '人物自动验收只支持严格 0 人或严格 1 人。' } }, 400);
+  let imageUrl;
+  try { imageUrl = validateQwenResultImageUrl(body.imageUrl); }
+  catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '人物自动验收只能检查刚刚由千问生成的有效图片。' } }, 400); }
+
+  const criteria = expectedPeople === 1
+    ? '合格条件：整张图恰好只有1名儿童；儿童位于帐篷入口门槛，身体与入口形成明确空间关系；至少一只手真实接触软质门帘或帐篷入口；儿童视线或动作朝向帐篷内部；不存在第二个人、远景人影、倒影人物、照片人物或人体局部。'
+    : '合格条件：整张图人物总数严格为0；不得有儿童、成人、路人、远景人影、人物剪影、人体局部、人物倒影、照片人物或屏幕人物。';
+  const upstream = await fetchUpstream(`${env.DASHSCOPE_CHAT_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1'}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: QWEN_VISION_MODEL,
+      messages: [{ role: 'user', content: [
+        { type: 'image_url', image_url: { url: imageUrl } },
+        { type: 'text', text: `你是严格的儿童帐篷商业图片验收员。逐一检查画面前景、背景、倒影、海报和屏幕，任何可见人体或局部都计入人数。${criteria}\n只输出 JSON：{"personCount":整数,"childCount":整数,"atTentEntrance":布尔值,"touchingTent":布尔值,"interactionVisible":布尔值,"extraPersonVisible":布尔值,"issues":["问题"]}。不确定时按不合格处理。` },
+      ] }],
+      response_format: { type: 'json_object' },
+      enable_thinking: false,
+      temperature: 0,
+      max_tokens: 300,
+    }),
+  }, UPSTREAM_TIMEOUTS.city);
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) return jsonResponse({ error: { code: data?.code || 'QWEN_INSPECTION_ERROR', message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 502);
+  let parsed;
+  try { parsed = parseInspectionJson(data?.choices?.[0]?.message?.content); }
+  catch { return jsonResponse({ error: { code: 'QWEN_INSPECTION_INVALID', message: '人物自动验收未返回有效结果，请重试。' } }, 502); }
+  const validCount = (value) => (typeof value === 'number' && Number.isInteger(value) && value >= 0) || (typeof value === 'string' && /^\d+$/.test(value));
+  const personCount = validCount(parsed.personCount) ? Number(parsed.personCount) : -1;
+  const childCount = validCount(parsed.childCount) ? Number(parsed.childCount) : -1;
+  const atTentEntrance = parsed.atTentEntrance === true;
+  const touchingTent = parsed.touchingTent === true;
+  const interactionVisible = parsed.interactionVisible === true;
+  const extraPersonVisible = parsed.extraPersonVisible === true;
+  const pass = expectedPeople === 0
+    ? personCount === 0 && childCount === 0 && !extraPersonVisible
+    : personCount === 1 && childCount === 1 && atTentEntrance && touchingTent && interactionVisible && !extraPersonVisible;
+  const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((item) => typeof item === 'string').slice(0, 6) : [];
+  if (!pass && !issues.length) issues.push(expectedPeople === 1 ? '人物数量或与帐篷的互动关系未达到验收条件。' : '画面中仍检测到人物或人体局部。');
+  return jsonResponse({ pass, expectedPeople, personCount, childCount, atTentEntrance, touchingTent, interactionVisible, extraPersonVisible, issues, model: QWEN_VISION_MODEL });
 }
 
 async function validateOpenAiKey(apiKey, env) {
@@ -405,6 +486,7 @@ async function handleApi(request, env) {
     if (!apiKey) return jsonResponse({ error: { code: 'KEY_REQUIRED', message: '请先输入有效的千问 API Key。' } }, 401);
     if (url.pathname === '/api/qwen/validate' && request.method === 'POST') return validateQwenKey(apiKey, env);
     if (url.pathname === '/api/qwen/generate' && request.method === 'POST') return createQwenTask(request, env, apiKey);
+    if (url.pathname === '/api/qwen/inspect-image' && request.method === 'POST') return inspectQwenImage(request, env, apiKey);
     if (url.pathname === '/api/qwen/plan-city' && request.method === 'POST') return planCity(request, env, apiKey, 'qwen');
     const taskMatch = url.pathname.match(/^\/api\/qwen\/tasks\/([^/]+)$/);
     if (taskMatch && request.method === 'GET') return getQwenTask(taskMatch[1], env, apiKey);
