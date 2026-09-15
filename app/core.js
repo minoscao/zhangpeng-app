@@ -60,17 +60,29 @@
   }
 
   function buildCombinations(state) {
-    let combinations = [{ tags: [], promptDetails: [], ratio: state.studio.ratio }];
+    let combinations = [{ tags: [], promptDetails: [], ratio: state.studio.ratio, sceneReferenceId: '', sceneReferenceName: '', sceneReferenceVersion: '', sceneReferenceReady: false }];
     enabledGroups(state).forEach((group) => {
       const expanded = selectedOptions(group).flatMap((option) => Array.from({ length: option.quantity }, (_, index) => ({
         label: option.quantity > 1 ? `${option.label} · 变体 ${index + 1}/${option.quantity}` : option.label,
         prompt: [option.prompt || option.label, variantDirection(index, option.quantity)].filter(Boolean).join('；'),
         ratio: option.ratio,
+        sceneReferenceId: group.id === 'group-location' ? option.id : '',
+        sceneReferenceName: group.id === 'group-location' ? (option.sceneReferenceName || '') : '',
+        sceneReferenceVersion: group.id === 'group-location' ? (option.sceneReferenceUpdatedAt || '') : '',
+        sceneReferenceReady: group.id === 'group-location' ? Boolean(option.sceneReferenceImage) : false,
       })));
       combinations = combinations.flatMap((combo) => expanded.map((option) => ({
         tags: [...combo.tags, `${group.name}：${option.label}`],
-        promptDetails: [...combo.promptDetails, `${group.name}：${option.prompt}`],
+        promptDetails: [
+          ...combo.promptDetails,
+          `${group.name}：${option.prompt}`,
+          ...(option.sceneReferenceId ? [`实景参考：${option.sceneReferenceReady ? '已绑定' : '未绑定'}`] : []),
+        ],
         ratio: option.ratio || combo.ratio,
+        sceneReferenceId: option.sceneReferenceId || combo.sceneReferenceId,
+        sceneReferenceName: option.sceneReferenceId ? option.sceneReferenceName : combo.sceneReferenceName,
+        sceneReferenceVersion: option.sceneReferenceId ? option.sceneReferenceVersion : combo.sceneReferenceVersion,
+        sceneReferenceReady: option.sceneReferenceId ? option.sceneReferenceReady : combo.sceneReferenceReady,
       })));
     });
     return combinations;
@@ -92,7 +104,7 @@
     return rules.find((rule) => rule.startsWith(`${name}：`))?.replace(new RegExp(`^${name}：`), '') || '';
   }
 
-  function locationDirective(locationRule, shotRule) {
+  function locationDirective(locationRule, shotRule, sceneEvidenceRule) {
     if (!locationRule) return '';
     const visibility = /环境远景|建立镜头/.test(shotRule)
       ? '环境占画面 75%–88%，只保留一个主地域锚点，占画面约 12%–25%，轮廓与关键特征清晰可辨。'
@@ -100,10 +112,12 @@
         ? '近景只在画面边缘或远景保留一个占画面约 5%–10% 的地域锚点；保持特征可辨，但不把地标放大贴到产品后方。'
         : '背景环境占画面 40%–55%，只保留一个主地域锚点，占画面约 8%–18%，名称对应的关键特征清晰可辨。';
     return [
-      '【地域场景硬约束｜不可省略】输入参考图只用于锁定帐篷产品，不代表成片背景；必须彻底移除参考图原有的白底、透明底、摄影棚或旧场景，并重新生成所选地区的真实环境。',
+      '【地域场景硬约束｜不可省略】图1只锁定帐篷；图2为用户核验的 Google Maps 实景，只锁定真实场地。两图职责不可交换。',
+      `【实景证据】${sceneEvidenceRule || '未绑定 Google Maps 实景截图；必须停止生成并先补充实景参考图。'}`,
+      '必须彻底移除图1旧背景，以图2为实景底稿放入帐篷；保留其建筑、道路、植被、光线和透视，不复制地图界面、标注、车牌、水印、原路人或车辆。',
       `目标地域：${locationRule}。`,
       `可见性验收：${visibility}`,
-      '主地标必须处于中远景并服从真实透视，不得像贴纸、布景板或巨型模型贴在帐篷后方。不得用普通草坪、无名住宅、纯色背景、摄影棚或无法辨认的背景虚化代替目标地域；不得出现其他城市的地标。若所选使用场景与户外地域冲突，将“儿童房、阅读角”等理解为面向该地标的开放露台或庭院活动区。',
+      '主地标位于中远景并服从真实透视，不得像贴纸贴在帐篷后方；不得用普通草坪、无名住宅、影棚或背景虚化代替目标地域，也不得出现其他城市地标。室内场景词与户外地域冲突时，以面向地标的露台或庭院解释。',
     ].join('\n');
   }
 
@@ -157,21 +171,22 @@
     const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
     const sourceRules = promptDetails.length ? promptDetails : tags;
     const rules = template?.id === 'white' || template?.backgroundMode === 'none'
-      ? sourceRules.filter((tag) => !tag.startsWith('当地背景：'))
+      ? sourceRules.filter((tag) => !tag.startsWith('当地背景：') && !tag.startsWith('实景参考：'))
       : sourceRules;
     const locationRule = ruleValue(rules, '当地背景');
+    const sceneEvidenceRule = ruleValue(rules, '实景参考');
     const shotRule = ruleValue(rules, '镜头景别');
     const peopleRule = ruleValue(rules, '出现人数');
     const wideShot = /环境远景|建立镜头/.test(shotRule);
     const combination = rules
-      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('镜头景别：') && !rule.startsWith('出现人数：'))
+      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('实景参考：') && !rule.startsWith('镜头景别：') && !rule.startsWith('出现人数：'))
       .map((tag) => tag.replace('：', '要求为').replace(/[。；\s]+$/, ''))
       .join('；');
     return [
       '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
       wideShot ? `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面中唯一的商业产品；本张为远景，环境必须主导画面面积，禁止为了突出产品而放大成中景。` : `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
       '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
-      locationDirective(locationRule, shotRule),
+      locationDirective(locationRule, shotRule, sceneEvidenceRule),
       shotRule ? `镜头景别硬性约束（不得自动折中成中景）：${shotRule}。若占比不符即视为生成失败。` : '',
       `场景任务：${template?.prompt || ''}`,
       sceneRealismDirective(template?.prompt || '', peopleRule, shotRule, product),

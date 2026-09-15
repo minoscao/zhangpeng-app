@@ -45,7 +45,7 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 14;
+const CURRENT_SCHEMA_VERSION = 15;
 const PUBLIC_PROMPT_TEMPLATES = [
   { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。人物数量只服从“出现人数”选项，不得自行增减。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
@@ -320,7 +320,16 @@ function upgradeCorePromptGroups(groups) {
     const templateLabels = new Set(template.options.map((option) => option.label));
     const upgradedOptions = template.options.map((option) => {
       const existing = existingOptions.find((item) => item.id === option.id || item.label === option.label);
-      return { ...structuredClone(option), selected: existing?.selected ?? option.selected, quantity: Math.max(1, Number(existing?.quantity) || option.quantity) };
+      return {
+        ...structuredClone(option),
+        selected: existing?.selected ?? option.selected,
+        quantity: Math.max(1, Number(existing?.quantity) || option.quantity),
+        ...(group.id === 'group-location' && existing?.sceneReferenceImage ? {
+          sceneReferenceImage: existing.sceneReferenceImage,
+          sceneReferenceName: existing.sceneReferenceName || '已上传实景截图',
+          sceneReferenceUpdatedAt: existing.sceneReferenceUpdatedAt || '',
+        } : {}),
+      };
     });
     const customOptions = existingOptions.filter((option) => !templateIds.has(option.id) && !templateLabels.has(option.label)).map((option) => ({ ...option, prompt: option.prompt || option.label, description: option.description || '自定义选项' }));
     return { ...structuredClone(template), enabled: group.enabled !== false, options: [...upgradedOptions, ...customOptions] };
@@ -602,6 +611,33 @@ function renderSelectedProducts() {
   return `<div class="selected-products" aria-label="已选择产品">${products.map((product, index) => `<article class="selected-product-card"><button class="selected-product-main" data-action="open-product-drawer" data-id="${product.id}"><span class="product-order">${index + 1}</span><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.sku)}</small></span></button><button class="icon-button remove-product" data-action="remove-selected-product" data-id="${product.id}" aria-label="移除${escapeHtml(product.name)}">${svgIcon('x')}</button></article>`).join('')}<button class="add-product-card" data-action="open-product-picker">${svgIcon('plus')}<span>添加产品</span></button></div>`;
 }
 
+function activePublicPrompt() {
+  return state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
+}
+
+function locationEvidenceRequired() {
+  const template = activePublicPrompt();
+  const group = state.promptGroups.find((item) => item.id === 'group-location');
+  return template?.id !== 'white' && template?.backgroundMode !== 'none' && group?.enabled && selectedOptions(group).length > 0;
+}
+
+function selectedLocationsMissingEvidence() {
+  if (!locationEvidenceRequired()) return [];
+  const group = state.promptGroups.find((item) => item.id === 'group-location');
+  return selectedOptions(group).filter((option) => !option.sceneReferenceImage);
+}
+
+function googleMapsSearchUrl(option) {
+  const query = [option?.label, option?.description].filter(Boolean).join(' ');
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function locationEvidenceSummary(group) {
+  const chosen = selectedOptions(group);
+  const ready = chosen.filter((option) => option.sceneReferenceImage).length;
+  return chosen.length ? `${ready}/${chosen.length} 个已选地点绑定实景` : '未选择地点';
+}
+
 function renderPromptGroups() {
   if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。<button class="button button--secondary" data-action="open-location">添加当地背景</button></div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
@@ -611,7 +647,8 @@ function renderPromptGroups() {
       ? '<button class="toggle-control" type="button" aria-pressed="true" disabled><span></span>必选</button>'
       : `<button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button>`;
     const deleteButton = requiredPeopleGroup ? '' : `<button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button>`;
-    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions">${groupToggle}<button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button>${deleteButton}</div></article>`;
+    const groupMeta = group.id === 'group-location' && group.enabled ? locationEvidenceSummary(group) : options.length ? `${groupFactor(group)} 个组合值` : '未选择选项';
+    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(groupMeta)}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip${group.id === 'group-location' ? (option.sceneReferenceImage ? ' is-verified' : ' is-warning') : ''}"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)}${group.id === 'group-location' ? ` · ${option.sceneReferenceImage ? '实景已绑定' : '待绑定实景'}` : ''} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions">${groupToggle}<button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button>${deleteButton}</div></article>`;
   }).join('')}</div>${state.promptGroups.some((group) => group.id === 'group-location') ? '' : '<button class="button button--secondary" data-action="open-location">添加当地背景</button>'}`;
 }
 
@@ -623,7 +660,14 @@ function renderPublicPromptArea() {
 }
 
 function renderLocationEditor(group) {
-  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="location-editor-title"><div class="modal-header"><div><h2 id="location-editor-title">当地背景</h2><p>选择多个城市参与批量组合；城市选择、背景补全与规则编辑都在这里完成。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭当地背景">${svgIcon('x')}</button></div><div class="city-planner"><label for="city-name">添加城市</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" value="${escapeHtml(cityDraft)}" placeholder="国家或城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help${cityPlannerError ? ' city-planner-error' : ''}" aria-invalid="${Boolean(cityPlannerError)}"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全背景…' : '添加并补全背景'}</button></div>${cityPlannerError ? `<p id="city-planner-error" class="field-error" role="alert">${escapeHtml(cityPlannerError)}</p>` : ''}<p id="city-planner-help">已有城市直接选用，不重复调用 AI。新城市由当前模型通道的文字 AI 补全背景，API 按量计费，推荐未经联网核验。添加不会取消其他城市。</p></div><div class="option-editor-list">${group.options.map((option) => `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}" ${cityPlannerBusy ? 'disabled' : ''}><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '展开查看背景规则')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>＋</button></div></div><details class="location-rule"><summary>${escapeHtml(option.label)} · 查看或修改背景规则</summary><label for="region-${escapeHtml(option.id)}">生图背景要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></details></div>`).join('')}</div><div class="modal-actions"><span class="selection-count">已选 ${selectedOptions(group).length} 个城市 · ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+  const selected = selectedOptions(group);
+  const missing = selected.filter((option) => !option.sceneReferenceImage);
+  const optionCards = group.options.map((option) => {
+    const mapsUrl = googleMapsSearchUrl(option);
+    const evidenceStatus = option.sceneReferenceImage ? '实景已绑定' : '待绑定实景';
+    return `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}" ${cityPlannerBusy ? 'disabled' : ''}><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '展开查看背景规则')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>＋</button></div></div><div class="scene-reference ${option.sceneReferenceImage ? 'is-ready' : ''}">${option.sceneReferenceImage ? `<button class="scene-reference-preview" type="button" data-action="preview-location-reference" data-id="${option.id}" aria-label="放大查看${escapeHtml(option.label)}实景参考图"><img src="${escapeHtml(option.sceneReferenceImage)}" alt="${escapeHtml(option.label)} Google Maps 实景参考"></button>` : `<div class="scene-reference-empty" aria-hidden="true">${svgIcon('image')}</div>`}<div class="scene-reference-copy"><strong>${escapeHtml(evidenceStatus)}</strong><span>${option.sceneReferenceImage ? `${escapeHtml(option.sceneReferenceName || '已上传实景截图')} · 生成时作为第 2 张参考图` : '先在 Google Maps 进入街景，选定与帐篷落位一致的真实视角，再上传截图。'}</span></div><div class="scene-reference-actions"><a class="button button--secondary" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener noreferrer">在 Google Maps 核验</a><label class="button button--quiet" for="scene-reference-${escapeHtml(option.id)}">${svgIcon('upload')}${option.sceneReferenceImage ? '替换截图' : '上传截图'}</label><input id="scene-reference-${escapeHtml(option.id)}" type="file" accept="image/png,image/jpeg,image/webp" data-scene-reference="${escapeHtml(option.id)}" hidden>${option.sceneReferenceImage ? `<button class="button button--quiet" type="button" data-action="remove-location-reference" data-id="${option.id}">移除</button>` : ''}</div></div><details class="location-rule"><summary>${escapeHtml(option.label)} · 查看或修改文字规则</summary><label for="region-${escapeHtml(option.id)}">补充地标与场景要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></details></div>`;
+  }).join('');
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="location-editor-title"><div class="modal-header"><div><h2 id="location-editor-title">当地背景 · 先核验实景再创作</h2><p>每个已选地点都要绑定一张 Google Maps 实景截图。文字规则负责说明，实景截图负责锁定真实建筑、道路、植被、光线与透视。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭当地背景">${svgIcon('x')}</button></div><div class="location-workflow" aria-label="当地背景工作流程"><span><b>1</b>选择地点</span><span><b>2</b>打开地图进入街景</span><span><b>3</b>上传同视角截图</span><span><b>4</b>确认提示词后生成</span></div><div class="city-planner"><label for="city-name">添加城市</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" value="${escapeHtml(cityDraft)}" placeholder="国家或城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help${cityPlannerError ? ' city-planner-error' : ''}" aria-invalid="${Boolean(cityPlannerError)}"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全文字规则…' : '添加并补全文字规则'}</button></div>${cityPlannerError ? `<p id="city-planner-error" class="field-error" role="alert">${escapeHtml(cityPlannerError)}</p>` : ''}<p id="city-planner-help">新增城市的 AI 文字建议不等于实景核验。Google Maps 链接无需额外密钥；打开后进入街景并上传截图，图片仅作为生成时的场景事实参考。</p></div><div class="option-editor-list">${optionCards}</div><div class="modal-actions"><span class="selection-count ${missing.length ? 'has-warning' : ''}">${selected.length ? `${selected.length - missing.length}/${selected.length} 个已选地点已绑定实景${missing.length ? ` · 还缺 ${missing.length} 个` : ''}` : '请至少选择一个地点'}</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
 async function enrichCity(label) {
@@ -884,6 +928,15 @@ function validatePromptReview(inline = false) {
 
 function confirmCurrentPromptReview(inline = false) {
   if ((!inline && promptReviewEditing) || !promptReview) return;
+  const missingEvidence = selectedLocationsMissingEvidence();
+  if (missingEvidence.length) {
+    promptReviewError = `请先为 ${missingEvidence.map((option) => option.label).join('、')} 上传 Google Maps 实景截图；尚未提交或扣分。`;
+    if (!inline) state.ui.confirmBatch = false;
+    state.ui.promptDialogGroupId = 'group-location';
+    render(); focusOverlay();
+    showToast('当地实景尚未核验', `还缺 ${missingEvidence.length} 个已选地点的实景截图。`);
+    return;
+  }
   if (promptReview.fingerprint !== reviewFingerprint()) { preparePromptReview(); render(); showToast('选项已变更', '请重新检查并确认提示词。'); return; }
   if (!validatePromptReview(inline)) return;
   confirmedPromptReviews[comparisonRequested ? 'comparison' : 'batch'] = structuredClone(promptReview);
@@ -930,7 +983,9 @@ function renderInlineFinalPrompt(batchRunning) {
   const entry = promptReview.entries[promptReviewIndex];
   if (!entry) return '<p class="final-prompt-empty">当前没有可确认的提示词配方。</p>';
   const confirmed = hasConfirmedPromptReview(false);
-  return `<div class="inline-final-prompt"><div class="final-prompt-heading"><div><h4 id="final-prompt-title">最终提示词</h4><p>汇总上方所有选项和要求。可切换检查每个产品与配方，并直接修改最终内容。</p></div><span class="final-prompt-badge ${confirmed ? 'is-confirmed' : ''}" data-inline-prompt-badge>${confirmed ? '已确认' : '待确认'}</span></div><label for="prompt-review-entry">当前配方</label><select id="prompt-review-entry" class="select-control" ${batchRunning ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p><label for="final-prompt-text">最终提示词 · 可直接修改</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), entry.prompt.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}" aria-invalid="${promptReviewError ? 'true' : 'false'}" ${batchRunning ? 'disabled' : ''}>${escapeHtml(entry.prompt)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<p id="prompt-review-help">修改只作用于当前配方；切换后可逐一检查。确认不会调用生图或扣分，当前模型上限为 ${promptReviewLimit()} 字。</p><div class="inline-prompt-confirm"><p data-inline-prompt-status role="status">${promptConfirmationText(false)}</p><button class="button button--primary" data-action="confirm-inline-prompts" ${batchRunning || generationStarting ? 'disabled' : ''}>${svgIcon('check')}确认最终提示词</button></div></div>`;
+  const missingEvidence = selectedLocationsMissingEvidence();
+  const evidenceGate = locationEvidenceRequired() ? `<div class="scene-evidence-gate ${missingEvidence.length ? 'is-blocked' : 'is-ready'}"><div><strong>${missingEvidence.length ? '生成前还缺真实场景依据' : 'Google Maps 实景依据已就绪'}</strong><p>${missingEvidence.length ? `请为 ${missingEvidence.map((option) => option.label).join('、')} 上传街景截图。系统不会只凭文字猜测当地场景。` : '生成时图1锁定帐篷，图2锁定对应地点的真实建筑、道路、植被、光线和透视。'}</p></div><button class="button button--secondary" data-action="edit-prompt-group" data-id="group-location">${missingEvidence.length ? '去核验实景' : '查看实景依据'}</button></div>` : '';
+  return `<div class="inline-final-prompt"><div class="final-prompt-heading"><div><h4 id="final-prompt-title">最终提示词</h4><p>汇总上方所有选项和要求。可切换检查每个产品与配方，并直接修改最终内容。</p></div><span class="final-prompt-badge ${confirmed ? 'is-confirmed' : ''}" data-inline-prompt-badge>${confirmed ? '已确认' : '待确认'}</span></div>${evidenceGate}<label for="prompt-review-entry">当前配方</label><select id="prompt-review-entry" class="select-control" ${batchRunning ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p><label for="final-prompt-text">最终提示词 · 可直接修改</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), entry.prompt.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}" aria-invalid="${promptReviewError ? 'true' : 'false'}" ${batchRunning ? 'disabled' : ''}>${escapeHtml(entry.prompt)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<p id="prompt-review-help">修改只作用于当前配方；切换后可逐一检查。确认不会调用生图或扣分，当前模型上限为 ${promptReviewLimit()} 字。</p><div class="inline-prompt-confirm"><p data-inline-prompt-status role="status">${missingEvidence.length ? `请先补齐 ${missingEvidence.length} 个地点实景，再确认提示词。` : promptConfirmationText(false)}</p><button class="button button--primary" data-action="confirm-inline-prompts" ${batchRunning || generationStarting || missingEvidence.length ? 'disabled' : ''}>${svgIcon('check')}确认最终提示词</button></div></div>`;
 }
 
 function reviewedPrompt(product, combo, comboIndex) {
@@ -950,7 +1005,8 @@ function renderConfirmDialog() {
   const total = plannedTotal();
   const profile = comparisonRequested ? { name: '同配方模型配置对比', model: Object.values(providerConfig().profiles).map((item) => item.model).join(' / ') } : generationProfile();
   const provider = providerConfig();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；${state.studio.provider === 'qwen' ? '含人物约束的千问图片会追加一次视觉验收，不合格时自动修复一次；视觉验收和修复由千问按实际调用计费，但不另扣软件积分。' : ''}同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
+  const missingEvidence = selectedLocationsMissingEvidence();
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${missingEvidence.length ? `<div class="scene-evidence-gate is-blocked"><div><strong>还不能确认：缺少 Google Maps 实景</strong><p>${escapeHtml(missingEvidence.map((option) => option.label).join('、'))} 尚未上传街景截图。</p></div><button class="button button--secondary" data-action="edit-prompt-group" data-id="group-location">去核验实景</button></div>` : ''}${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；${state.studio.provider === 'qwen' ? '含人物约束的千问图片会追加一次视觉验收，不合格时自动修复一次；视觉验收和修复由千问按实际调用计费，但不另扣软件积分。' : ''}同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing || missingEvidence.length ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
 }
 
 function renderApiKeyDialog() {
@@ -1267,6 +1323,16 @@ async function referenceImageForModel(product) {
   }
 }
 
+async function referenceImagesForResult(result, product) {
+  const productReference = await referenceImageForModel(product);
+  if (!result.sceneReferenceId) return [productReference];
+  const sceneReference = state.batch.sceneReferences?.[result.sceneReferenceId];
+  if (!sceneReference?.image) throw new Error('对应地点的 Google Maps 实景截图已丢失，请返回当地背景重新上传后生成。');
+  const combinedLength = productReference.length + sceneReference.image.length;
+  if (combinedLength > 11_000_000) throw new Error('产品图与街景截图合计过大，请压缩街景截图后重新上传。');
+  return [productReference, sceneReference.image];
+}
+
 async function submitQwenResult(result) {
   const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
@@ -1275,12 +1341,12 @@ async function submitQwenResult(result) {
   result.remoteStatus = 'SUBMITTING';
   result.error = '';
   saveState(); render();
-  const referenceImage = await referenceImageForModel(product);
+  const referenceImages = await referenceImagesForResult(result, product);
   result.requestId ||= uid('request');
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
-    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneReferenceAttached: Boolean(result.sceneReferenceId), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.taskId = task.taskId;
   result.model = task.model;
@@ -1292,7 +1358,7 @@ async function submitQwenResult(result) {
 async function submitOpenAiResult(result) {
   const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
-  const referenceImage = await referenceImageForModel(product);
+  const referenceImages = await referenceImagesForResult(result, product);
   result.status = 'loading';
   result.submittedAt = Date.now();
   result.remoteStatus = 'RUNNING';
@@ -1301,7 +1367,7 @@ async function submitOpenAiResult(result) {
   const output = await apiJson('/api/openai/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
-    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages: [referenceImage], ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneReferenceAttached: Boolean(result.sceneReferenceId), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.image = output.imageUrl;
   result.model = output.model;
@@ -1462,6 +1528,8 @@ function finishBatch(batchId) {
 async function startBatchGeneration() {
   if (generationStarting || promptReviewEditing || state.batch.status === 'generating' || activeGenerationId) return;
   const requestedComparison = comparisonRequested;
+  const missingEvidence = selectedLocationsMissingEvidence();
+  if (missingEvidence.length) { syncPromptConfirmationControls(); showToast('请先核验当地实景', `还缺 ${missingEvidence.map((option) => option.label).join('、')} 的 Google Maps 街景截图，尚未提交或扣分。`); return; }
   if (!hasConfirmedPromptReview(requestedComparison)) { syncPromptConfirmationControls(); showToast('请先确认最终提示词', '请在上方“最终提示词”区域检查并确认后再生成。'); return; }
   const approvedReview = confirmedPromptReviews[requestedComparison ? 'comparison' : 'batch'];
   promptReview = structuredClone(approvedReview);
@@ -1485,12 +1553,17 @@ async function startBatchGeneration() {
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
   const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
   const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
-  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false, autoRepairAttempts: 0, qualityCheck: null }))));
+  const locationGroup = state.promptGroups.find((group) => group.id === 'group-location');
+  const sceneReferences = Object.fromEntries([...new Set(combinations.map((combo) => combo.sceneReferenceId).filter(Boolean))].map((id) => {
+    const option = locationGroup?.options.find((item) => item.id === id);
+    return [id, { image: option?.sceneReferenceImage || '', name: option?.sceneReferenceName || '', label: option?.label || id }];
+  }));
+  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, sceneReferenceId: combo.sceneReferenceId || '', provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false, autoRepairAttempts: 0, qualityCheck: null }))));
   if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
   confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
   state.credits -= cost;
-  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
+  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, sceneReferences, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   state.ui.batchAuditOpen = false;
@@ -1680,6 +1753,24 @@ document.addEventListener('click', async (event) => {
   if (!button) return;
   const action = button.dataset.action;
   if (action === 'back-styles') { stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay(); return; }
+  if (action === 'preview-location-reference') {
+    const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === button.dataset.id);
+    if (option?.sceneReferenceImage) {
+      rememberFocus();
+      imagePreview = { image: option.sceneReferenceImage, title: `${option.label} · 实景参考`, meta: `${option.sceneReferenceName || 'Google Maps 街景截图'} · 仅作为场景事实依据`, downloadName: `${option.label}-实景参考` };
+      render(); focusOverlay();
+    }
+    return;
+  }
+  if (action === 'remove-location-reference') {
+    const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === button.dataset.id);
+    if (option) {
+      delete option.sceneReferenceImage; delete option.sceneReferenceName; delete option.sceneReferenceUpdatedAt;
+      markRecipeCustomized(); saveState(); render(); focusOverlay();
+      showToast('实景截图已移除', `${option.label} 需要重新核验后才能生成。`);
+    }
+    return;
+  }
   if (action === 'save-style-prompt') { saveStylePrompt(); return; }
   if (action === 'view-style-prompt') { const option = state.promptGroups.find((group) => group.id === 'group-style')?.options.find((item) => item.id === button.dataset.id); if (option) openStylePrompt(option); render(); focusOverlay(); return; }
   if (action === 'back-regions') { regionPreviewId = ''; render(); focusOverlay(); return; }
@@ -1878,6 +1969,29 @@ document.addEventListener('input', (event) => {
 });
 
 document.addEventListener('change', (event) => {
+  if (event.target.dataset?.sceneReference) {
+    const file = event.target.files?.[0];
+    const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.sceneReference);
+    if (!file || !option) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('图片格式不支持', '请上传 PNG、JPG 或 WebP 格式的街景截图。'); return; }
+    if (file.size > 4 * 1024 * 1024) { showToast('街景截图过大', '请将图片压缩到 4MB 以内再上传，避免两张参考图超过模型限制。'); return; }
+    const reader = new FileReader();
+    reader.onerror = () => showToast('街景截图读取失败', '请重新选择图片，原有实景依据不会被覆盖。');
+    reader.onload = () => {
+      const value = String(reader.result || '');
+      if (!value.startsWith('data:image/')) { showToast('街景截图无效', '请重新导出并上传有效的图片文件。'); return; }
+      option.sceneReferenceImage = value;
+      option.sceneReferenceName = file.name;
+      option.sceneReferenceUpdatedAt = new Date().toISOString();
+      option.selected = true;
+      const group = state.promptGroups.find((item) => item.id === 'group-location');
+      if (group) group.enabled = true;
+      markRecipeCustomized(); saveState(); render(); focusOverlay();
+      showToast('实景依据已绑定', `${option.label} 生成时将使用产品图 + 街景截图两张参考图。`, 'check');
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
   if (event.target.id === 'prompt-review-entry' && !promptReviewEditing) { const index = Number(event.target.value); if (Number.isInteger(index) && promptReview?.entries[index]) { promptReviewIndex = index; promptReviewError = ''; render(); $('#prompt-review-entry')?.focus(); } return; }
   if (event.target.id === 'studio-provider') { setStudioProvider(event.target.value); return; }
   if (event.target.id === 'studio-quality') { setStudioQuality(event.target.value); return; }

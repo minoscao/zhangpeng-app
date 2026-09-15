@@ -165,6 +165,12 @@ function prioritizePeoplePrompt(prompt, expectedPeople) {
   return `${priority}\n${prompt}`.slice(0, MAX_PROMPT_LENGTH);
 }
 
+function prioritizeReferenceRoles(prompt, sceneReferenceAttached) {
+  if (!sceneReferenceAttached) return prompt;
+  const roleRule = '【两张参考图职责｜顺序不可混淆】图1是帐篷产品参考图：只提取帐篷结构、轮廓、开口、支架、缝线与比例。图2是经用户核验的 Google Maps 实景参考图：以它作为真实场地底稿，保留建筑、道路、地面、植被、地形、光线、机位与单一透视，再把图1帐篷自然放入图2的可用位置。不得把图2中的路人、车辆、地图界面、图钉、店名、道路文字、车牌、水印带入成片；不得用想象中的通用城市替换图2。';
+  return `${roleRule}\n${prompt}`.slice(0, MAX_PROMPT_LENGTH);
+}
+
 function upstreamErrorMessage(data, status) {
   const detail = data?.message || data?.error?.message || '';
   if (status === 429 || data?.code === 'Throttling') return '模型请求过于频繁，请稍后重试。';
@@ -226,6 +232,10 @@ async function createQwenTask(request, env, apiKey) {
 
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
+  const sceneReferenceAttached = body.sceneReferenceAttached === true;
+  if (locationRequired && (!sceneReferenceAttached || referenceImages.length < 2)) {
+    return jsonResponse({ error: { code: 'SCENE_REFERENCE_REQUIRED', message: '当地背景任务必须同时上传产品图和经 Google Maps 核验的实景截图。' } }, 400);
+  }
   const expectedPeople = expectedPeopleFromPrompt(prompt);
   const noPeopleRequired = expectedPeople === 0;
   const peopleRequired = Number.isInteger(expectedPeople) && expectedPeople > 0;
@@ -234,7 +244,7 @@ async function createQwenTask(request, env, apiKey) {
     try { repairImageUrl = validateQwenResultImageUrl(body.repairImageUrl); }
     catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '自动修复只能使用刚刚由千问生成的有效图片。' } }, 400); }
   }
-  const effectivePrompt = prioritizePeoplePrompt(prompt, expectedPeople);
+  const effectivePrompt = prioritizeReferenceRoles(prioritizePeoplePrompt(prompt, expectedPeople), sceneReferenceAttached);
   const content = [...(repairImageUrl ? [{ image: repairImageUrl }] : referenceImages.map((image) => ({ image }))), { text: effectivePrompt }];
   const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
@@ -247,6 +257,7 @@ async function createQwenTask(request, env, apiKey) {
       peopleRequired ? `超过${expectedPeople}名儿童，第${expectedPeople + 1}个人，额外人物，成人，人群，路人，远景人影，人物剪影，额外手脚，人物倒影，照片人物，屏幕人像` : '',
       peopleRequired ? '任一人物与帐篷无互动，人物远离帐篷，人物独立站立，人物在帐篷旁边摆拍，人物背对帐篷，人物忽视帐篷，手未接触帐篷，手穿透帐篷，错误接触关系，错误前后遮挡' : '',
       '拼贴感，舞台布景，假景片，多个消失点，地平线错位，建筑倾斜，地标比例过大，帐篷悬浮，物体穿插，阴影方向冲突，杂乱道具，过度背景虚化',
+      sceneReferenceAttached ? 'Google Maps界面，地图控件，地图图钉，道路文字，店名，车牌，水印，实景截图中的原路人，实景截图中的原车辆，想象的通用城市背景' : '',
       locationRequired ? '参考图白底，透明背景，摄影棚背景，纯色背景，普通无名草坪，通用住宅，错误城市，缺失地标，地标无法辨认，背景过度虚化' : '',
     ].filter(Boolean).join('，'),
     size: qualitySize[body.ratio] || qualitySize['4:3'],
@@ -407,11 +418,16 @@ async function createOpenAiImage(request, env, apiKey) {
     return jsonResponse({ error: { code: error.message, message: '参考图必须来自本站素材目录，最多 3 张且单张不超过 10MB。' } }, 400);
   }
   if (!referenceImages.length) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '请先选择至少一张产品参考图。' } }, 400);
+  const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
+  const sceneReferenceAttached = body.sceneReferenceAttached === true;
+  if (locationRequired && (!sceneReferenceAttached || referenceImages.length < 2)) {
+    return jsonResponse({ error: { code: 'SCENE_REFERENCE_REQUIRED', message: '当地背景任务必须同时上传产品图和经 Google Maps 核验的实景截图。' } }, 400);
+  }
 
   const profile = openAiGenerationProfile(body.generationMode);
   const form = new FormData();
   form.append('model', profile.model);
-  form.append('prompt', `${prompt}\n禁止出现文字、商标、水印、错误支架、多余结构、模糊或廉价塑料质感。`);
+  form.append('prompt', `${prioritizeReferenceRoles(prompt, sceneReferenceAttached)}\n禁止出现文字、商标、水印、Google Maps 界面或控件、地图图钉、道路文字、车牌、错误支架、多余结构、模糊或廉价塑料质感。`);
   form.append('quality', profile.quality);
   form.append('size', OPENAI_SIZE_BY_RATIO[body.ratio] || OPENAI_SIZE_BY_RATIO['4:3']);
   form.append('output_format', 'jpeg');

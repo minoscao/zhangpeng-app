@@ -21,7 +21,7 @@ globalThis.fetch = async (input, init = {}) => {
     assert.equal(init.body.get('model'), 'gpt-image-2');
     assert.equal(init.body.get('quality'), 'low');
     assert.equal(init.body.get('size'), '1536x1152');
-    assert.equal(init.body.getAll('image[]').length, 1);
+    assert.ok([1, 2].includes(init.body.getAll('image[]').length));
     return Response.json({ data: [{ b64_json: 'aW1hZ2U=' }] });
   }
   if (url.endsWith('/chat/completions')) {
@@ -77,6 +77,7 @@ assert.equal(generateResponse.status, 200);
 assert.equal(result.imageUrl, 'data:image/jpeg;base64,aW1hZ2U=');
 assert.equal(result.provider, 'openai');
 assert.ok(editRequest);
+assert.equal(editRequest.body.getAll('image[]').length, 1);
 
 for (const provider of ['openai', 'qwen']) {
   const cityResponse = await worker.fetch(new Request(`https://app.example/api/${provider}/plan-city`, {
@@ -97,10 +98,26 @@ for (const prompt of ['生成真实帐篷产品场景', 'a'.repeat(2001)]) {
 assert.ok(wanRequest);
 
 const regionalPrompt = '【地域场景硬约束｜不可省略】必须彻底移除参考图白底，并清楚显示悉尼歌剧院。\n【人物数量硬约束｜0人】画面完全无人，人物数量必须严格等于 0。';
-const qwenQualityResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+const openAiSceneResponse = await worker.fetch(new Request('https://app.example/api/openai/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-OpenAI-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,c3RyZWV0'], sceneReferenceAttached: true, generationMode: 'fast', ratio: '4:3' }),
+}), env);
+assert.equal(openAiSceneResponse.status, 200);
+assert.equal(editRequest.body.getAll('image[]').length, 2);
+assert.match(editRequest.body.get('prompt'), /图1是帐篷产品参考图/);
+assert.match(editRequest.body.get('prompt'), /图2是经用户核验的 Google Maps 实景参考图/);
+const missingSceneResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
   body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.equal(missingSceneResponse.status, 400);
+assert.equal((await missingSceneResponse.json()).error.code, 'SCENE_REFERENCE_REQUIRED');
+const qwenQualityResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,c3RyZWV0'], sceneReferenceAttached: true, generationMode: 'quality', ratio: '4:3' }),
 }), env);
 assert.equal(qwenQualityResponse.status, 202);
 const qualityRequest = qwenRequests.at(-1);
@@ -117,6 +134,10 @@ assert.match(qualityRequest.parameters.negative_prompt, /人物剪影/);
 assert.match(qualityRequest.parameters.negative_prompt, /人物倒影/);
 assert.match(qualityRequest.parameters.negative_prompt, /多个消失点/);
 assert.match(qualityRequest.parameters.negative_prompt, /阴影方向冲突/);
+assert.match(qualityRequest.parameters.negative_prompt, /Google Maps界面/);
+assert.equal(qualityRequest.input.messages[0].content.filter((item) => item.image).length, 2);
+assert.match(qualityRequest.input.messages[0].content.at(-1).text, /图1是帐篷产品参考图/);
+assert.match(qualityRequest.input.messages[0].content.at(-1).text, /图2是经用户核验的 Google Maps 实景参考图/);
 assert.match(cityRequest.messages[0].content, /只选择一个最有把握/);
 
 await worker.fetch(new Request('https://app.example/api/qwen/generate', {
