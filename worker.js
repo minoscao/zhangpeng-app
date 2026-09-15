@@ -145,10 +145,20 @@ function validateQwenResultImageUrl(value) {
   return imageUrl.href;
 }
 
-function prioritizePeoplePrompt(prompt, noPeopleRequired, onePersonRequired) {
-  const priority = onePersonRequired
-    ? '【最高优先级｜先完成人物数量与互动，再处理背景】输入参考图中的人物不是产品结构，必须先全部移除。最终画面重新只安排 1 名儿童：儿童坐在帐篷入口门槛，身体跨越篷内外，一只手与软质门帘发生清楚可见的真实接触，视线朝向帐篷内部。禁止出现第二个人，禁止站在帐篷旁边摆拍、远离、背对或忽视帐篷。若人数不等于 1 或接触关系不可见，结果即不合格。'
-    : noPeopleRequired
+function expectedPeopleFromPrompt(prompt) {
+  const match = String(prompt || '').match(/【人物数量硬约束｜([0-3])人】/);
+  return match ? Number(match[1]) : null;
+}
+
+function prioritizePeoplePrompt(prompt, expectedPeople) {
+  const interactionByCount = {
+    1: '唯一儿童坐在帐篷入口门槛，身体跨越篷内外，一只手清楚接触软质门帘，视线朝向篷内。',
+    2: '儿童 A 在入口门槛轻扶门帘，儿童 B 在篷内靠近入口处整理坐垫或看书；两人都清楚参与帐篷活动。',
+    3: '儿童 A 在入口门槛轻扶门帘，儿童 B 在篷内靠近入口处看书，儿童 C 在入口外侧把坐垫递向篷内；三人位置错开且都清楚参与帐篷活动。',
+  };
+  const priority = expectedPeople > 0
+    ? `【最高优先级｜先完成人物数量与互动，再处理背景】输入参考图中的人物不是产品结构，必须先全部移除。最终画面重新只安排 ${expectedPeople} 名儿童，人物总数严格等于 ${expectedPeople}，不得多一个或少一个。${interactionByCount[expectedPeople]}禁止任何额外人物、远景人影、局部肢体或倒影，禁止任何儿童站在帐篷旁边摆拍、远离、背对或忽视帐篷。若人数不符或任一儿童的互动不可见，结果即不合格。`
+    : expectedPeople === 0
       ? '【最高优先级｜严格无人】输入参考图中的人物不是产品结构，必须全部移除。最终画面人物总数严格等于 0，包括远景人影、局部肢体、倒影、照片或屏幕中的人物。'
       : '';
   if (!priority) return prompt;
@@ -216,14 +226,15 @@ async function createQwenTask(request, env, apiKey) {
 
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
-  const noPeopleRequired = prompt.includes('【人物数量硬约束｜0人】');
-  const onePersonRequired = prompt.includes('【人物数量硬约束｜1人】');
+  const expectedPeople = expectedPeopleFromPrompt(prompt);
+  const noPeopleRequired = expectedPeople === 0;
+  const peopleRequired = Number.isInteger(expectedPeople) && expectedPeople > 0;
   let repairImageUrl = '';
   if (body.repairImageUrl) {
     try { repairImageUrl = validateQwenResultImageUrl(body.repairImageUrl); }
     catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '自动修复只能使用刚刚由千问生成的有效图片。' } }, 400); }
   }
-  const effectivePrompt = prioritizePeoplePrompt(prompt, noPeopleRequired, onePersonRequired);
+  const effectivePrompt = prioritizePeoplePrompt(prompt, expectedPeople);
   const content = [...(repairImageUrl ? [{ image: repairImageUrl }] : referenceImages.map((image) => ({ image }))), { text: effectivePrompt }];
   const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
@@ -233,8 +244,8 @@ async function createQwenTask(request, env, apiKey) {
       '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
       '模糊人脸，五官融化，左右眼不对称，蜡像皮肤，重复人物，多余手指，多余肢体，断肢，穿模，错误遮挡，人物比例错误',
       noPeopleRequired ? '人物，儿童，成人，路人，人群，远景人影，人物剪影，人体局部，手，脚，脸，人物倒影，照片人物，屏幕人像' : '',
-      onePersonRequired ? '第二个人，额外人物，多人，人群，路人，远景人影，人物剪影，额外手脚，人物倒影，照片人物，屏幕人像' : '',
-      onePersonRequired ? '人物与帐篷无互动，人物远离帐篷，人物独立站立，人物在帐篷旁边摆拍，人物背对帐篷，人物忽视帐篷，手未接触帐篷，手穿透帐篷，错误接触关系，错误前后遮挡' : '',
+      peopleRequired ? `超过${expectedPeople}名儿童，第${expectedPeople + 1}个人，额外人物，成人，人群，路人，远景人影，人物剪影，额外手脚，人物倒影，照片人物，屏幕人像` : '',
+      peopleRequired ? '任一人物与帐篷无互动，人物远离帐篷，人物独立站立，人物在帐篷旁边摆拍，人物背对帐篷，人物忽视帐篷，手未接触帐篷，手穿透帐篷，错误接触关系，错误前后遮挡' : '',
       '拼贴感，舞台布景，假景片，多个消失点，地平线错位，建筑倾斜，地标比例过大，帐篷悬浮，物体穿插，阴影方向冲突，杂乱道具，过度背景虚化',
       locationRequired ? '参考图白底，透明背景，摄影棚背景，纯色背景，普通无名草坪，通用住宅，错误城市，缺失地标，地标无法辨认，背景过度虚化' : '',
     ].filter(Boolean).join('，'),
@@ -284,13 +295,13 @@ async function inspectQwenImage(request, env, apiKey) {
   try { body = await readJsonBody(request); }
   catch { return jsonResponse({ error: { code: 'INVALID_JSON', message: '人物自动验收请求格式无效。' } }, 400); }
   const expectedPeople = Number(body.expectedPeople);
-  if (![0, 1].includes(expectedPeople)) return jsonResponse({ error: { code: 'INVALID_EXPECTATION', message: '人物自动验收只支持严格 0 人或严格 1 人。' } }, 400);
+  if (![0, 1, 2, 3].includes(expectedPeople)) return jsonResponse({ error: { code: 'INVALID_EXPECTATION', message: '人物自动验收支持严格 0–3 人。' } }, 400);
   let imageUrl;
   try { imageUrl = validateQwenResultImageUrl(body.imageUrl); }
   catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '人物自动验收只能检查刚刚由千问生成的有效图片。' } }, 400); }
 
-  const criteria = expectedPeople === 1
-    ? '合格条件：整张图恰好只有1名儿童；儿童位于帐篷入口门槛，身体与入口形成明确空间关系；至少一只手真实接触软质门帘或帐篷入口；儿童视线或动作朝向帐篷内部；不存在第二个人、远景人影、倒影人物、照片人物或人体局部。'
+  const criteria = expectedPeople > 0
+    ? `合格条件：整张图恰好只有${expectedPeople}名儿童且没有成人；所有儿童都必须直接参与帐篷活动，不能有人只在旁边摆拍、远离、背对或忽视帐篷；至少一名儿童位于帐篷入口门槛，至少一只手真实接触软质门帘或帐篷入口；每名儿童的脸、身体和互动动作清楚可辨；不存在第${expectedPeople + 1}个人、远景人影、倒影人物、照片人物或人体局部。`
     : '合格条件：整张图人物总数严格为0；不得有儿童、成人、路人、远景人影、人物剪影、人体局部、人物倒影、照片人物或屏幕人物。';
   const upstream = await fetchUpstream(`${env.DASHSCOPE_CHAT_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1'}/chat/completions`, {
     method: 'POST',
@@ -299,7 +310,7 @@ async function inspectQwenImage(request, env, apiKey) {
       model: QWEN_VISION_MODEL,
       messages: [{ role: 'user', content: [
         { type: 'image_url', image_url: { url: imageUrl } },
-        { type: 'text', text: `你是严格的儿童帐篷商业图片验收员。逐一检查画面前景、背景、倒影、海报和屏幕，任何可见人体或局部都计入人数。${criteria}\n只输出 JSON：{"personCount":整数,"childCount":整数,"atTentEntrance":布尔值,"touchingTent":布尔值,"interactionVisible":布尔值,"extraPersonVisible":布尔值,"issues":["问题"]}。不确定时按不合格处理。` },
+        { type: 'text', text: `你是严格的儿童帐篷商业图片验收员。逐一检查画面前景、背景、倒影、海报和屏幕，任何可见人体或局部都计入人数。${criteria}\n只输出 JSON：{"personCount":整数,"childCount":整数,"atTentEntrance":布尔值,"touchingTent":布尔值,"interactionVisible":布尔值,"allPeopleInteracting":布尔值,"extraPersonVisible":布尔值,"issues":["问题"]}。allPeopleInteracting 只有在每名儿童都直接参与帐篷活动时才为 true；不确定时按不合格处理。` },
       ] }],
       response_format: { type: 'json_object' },
       enable_thinking: false,
@@ -318,13 +329,14 @@ async function inspectQwenImage(request, env, apiKey) {
   const atTentEntrance = parsed.atTentEntrance === true;
   const touchingTent = parsed.touchingTent === true;
   const interactionVisible = parsed.interactionVisible === true;
+  const allPeopleInteracting = parsed.allPeopleInteracting === true;
   const extraPersonVisible = parsed.extraPersonVisible === true;
   const pass = expectedPeople === 0
     ? personCount === 0 && childCount === 0 && !extraPersonVisible
-    : personCount === 1 && childCount === 1 && atTentEntrance && touchingTent && interactionVisible && !extraPersonVisible;
+    : personCount === expectedPeople && childCount === expectedPeople && atTentEntrance && touchingTent && interactionVisible && allPeopleInteracting && !extraPersonVisible;
   const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((item) => typeof item === 'string').slice(0, 6) : [];
-  if (!pass && !issues.length) issues.push(expectedPeople === 1 ? '人物数量或与帐篷的互动关系未达到验收条件。' : '画面中仍检测到人物或人体局部。');
-  return jsonResponse({ pass, expectedPeople, personCount, childCount, atTentEntrance, touchingTent, interactionVisible, extraPersonVisible, issues, model: QWEN_VISION_MODEL });
+  if (!pass && !issues.length) issues.push(expectedPeople > 0 ? '人物数量或每个人与帐篷的互动关系未达到验收条件。' : '画面中仍检测到人物或人体局部。');
+  return jsonResponse({ pass, expectedPeople, personCount, childCount, atTentEntrance, touchingTent, interactionVisible, allPeopleInteracting, extraPersonVisible, issues, model: QWEN_VISION_MODEL });
 }
 
 async function validateOpenAiKey(apiKey, env) {

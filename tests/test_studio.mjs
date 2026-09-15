@@ -42,16 +42,33 @@ assert.doesNotMatch(whitePromptWithoutLocation, /Flinders Street Station|地域�
 assert.match(whitePromptWithoutLocation, /人物数量硬约束｜0人/);
 assert.match(whitePromptWithoutLocation, /不得出现任何场景道具/);
 run("state.studio.publicPromptId = 'family'");
+const familyWithoutPeople = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
+assert.match(familyWithoutPeople, /人物数量硬约束｜0人/);
+assert.doesNotMatch(familyWithoutPeople, /人物数量硬约束｜1人/);
+run("state.studio.otherRequirements = '请安排两个孩子玩耍';");
+assert.match(run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)'), /人物数量硬约束｜0人/);
+run("state.studio.otherRequirements = ''; const peopleGroup = state.promptGroups.find((group) => group.id === 'group-people'); peopleGroup.options.forEach((option) => { option.selected = option.id === 'people-one'; });");
 const familyPrompt = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
 assert.match(familyPrompt, /人物数量硬约束｜1人/);
-assert.match(familyPrompt, /画面只允许一名儿童/);
-assert.match(familyPrompt, /不得出现第二个人/);
-assert.match(familyPrompt, /脸部与帐篷入口处于同一清晰焦平面/);
-assert.match(familyPrompt, /双眼、鼻子、嘴和脸部轮廓完整自然/);
-assert.match(familyPrompt, /人物互动硬约束｜必须可见/);
+assert.match(familyPrompt, /本张只允许 1 名儿童/);
+assert.match(familyPrompt, /人物总数必须严格等于 1/);
+assert.match(familyPrompt, /所有人的完整五官和互动处在清晰焦平面/);
+assert.match(familyPrompt, /人物互动硬约束｜每个人都必须可见/);
 assert.match(familyPrompt, /身体一半在篷内、一半在篷外/);
-assert.match(familyPrompt, /一只手明确接触并轻扶软质门帘边缘/);
-assert.match(familyPrompt, /不得独立站在旁边摆拍/);
+assert.match(familyPrompt, /一只手明确轻扶软质门帘边缘/);
+assert.match(familyPrompt, /只在旁边摆拍/);
+run("state.promptGroups.find((group) => group.id === 'group-people').options.forEach((option) => { option.selected = option.id === 'people-two'; });");
+const twoPeoplePrompt = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
+assert.match(twoPeoplePrompt, /人物数量硬约束｜2人/);
+assert.match(twoPeoplePrompt, /人物总数必须严格等于 2/);
+assert.match(twoPeoplePrompt, /儿童 A/);
+assert.match(twoPeoplePrompt, /儿童 B/);
+assert.match(twoPeoplePrompt, /共同形成正在使用帐篷的关系/);
+run("state.promptGroups.find((group) => group.id === 'group-people').options.forEach((option) => { option.selected = option.id === 'people-three'; });");
+const threePeoplePrompt = run('generationPrompt(state.products[3], buildCombinations()[0].tags, buildCombinations()[0].promptDetails)');
+assert.match(threePeoplePrompt, /人物数量硬约束｜3人/);
+assert.match(threePeoplePrompt, /儿童 C/);
+run("state.promptGroups.find((group) => group.id === 'group-people').options.forEach((option) => { option.selected = option.id === 'people-one'; });");
 run("state.studio.publicPromptId = 'cabin'; state.studio.requirements = '后面必须有小木屋'; state.studio.provider = 'qwen'; comparisonRequested = true;");
 assert.equal(run('plannedTotal()'), 3);
 run('state.ui.confirmBatch = true');
@@ -130,7 +147,7 @@ assert.match(run('state.savedAssets[0].tags.join(" ")'), /验收通过/);
 
 run(`state = structuredClone(seedState); state.savedAssets = [];
   state.batch = {id: 'B-AUTO-QA', status: 'generating', provider: 'qwen', generationMode: 'quality', results: [{
-    id: 'result-auto-qa', productId: 'p-1', image: '', tags: [], prompt: '【人物数量硬约束｜1人】\\n【人物互动硬约束｜必须可见】', ratio: '4:3', generationMode: 'quality', model: 'qwen-image-3.0-pro', status: 'loading', taskId: 'task-original', remoteStatus: 'SUCCEEDED', autoRepairAttempts: 0, creditRefunded: false, evaluation: Core.emptyEvaluation(), review: 'pending'
+    id: 'result-auto-qa', productId: 'p-1', image: '', tags: [], prompt: '【人物数量硬约束｜1人】\\n【人物互动硬约束｜每个人都必须可见】', ratio: '4:3', generationMode: 'quality', model: 'qwen-image-3.0-pro', status: 'loading', taskId: 'task-original', remoteStatus: 'SUCCEEDED', autoRepairAttempts: 0, creditRefunded: false, evaluation: Core.emptyEvaluation(), review: 'pending'
   }]};
   let autoQaCalls = 0;
   apiJson = async (path, options) => {
@@ -138,7 +155,7 @@ run(`state = structuredClone(seedState); state.savedAssets = [];
       autoQaCalls += 1;
       return autoQaCalls === 1
         ? {pass:false, personCount:2, childCount:2, interactionVisible:false, issues:['出现第二名儿童','人物没有接触帐篷']}
-        : {pass:true, personCount:1, childCount:1, atTentEntrance:true, touchingTent:true, interactionVisible:true, extraPersonVisible:false, issues:[]};
+        : {pass:true, personCount:1, childCount:1, atTentEntrance:true, touchingTent:true, interactionVisible:true, allPeopleInteracting:true, extraPersonVisible:false, issues:[]};
     }
     if (path === '/api/qwen/generate') {
       const body = JSON.parse(options.body);
@@ -182,10 +199,12 @@ assert.equal(run('state.credits'), 103);
 run('sleep = productionSleep; apiJson = productionApiJson;');
 
 run('state = structuredClone(seedState); state.schemaVersion = 7; state.studio.generationMode = "fast"; applySavedState(structuredClone(state));');
-assert.equal(run('state.schemaVersion'), 13);
+assert.equal(run('state.schemaVersion'), 14);
 assert.equal(run('state.studio.generationMode'), 'fast');
 assert.equal(run('state.savedAssets.every((asset) => asset.demo)'), true);
 assert.equal(run('state.promptGroups[0].options.some((option) => option.id === "melbourne")'), true);
+assert.equal(run('state.promptGroups.some((group) => group.id === "group-people")'), true);
+assert.equal(run('state.promptGroups.find((group) => group.id === "group-people").options.find((option) => option.id === "people-none").selected'), true);
 run("state.publicPrompts.push({id: 'white-copy', backgroundMode: 'none', prompt: '纯白背景'}); state.studio.publicPromptId = 'white-copy';");
 assert.doesNotMatch(run('generationPrompt(state.products[3], ["当地背景：墨尔本天际线"], [])'), /墨尔本天际线/);
 run("regionPreviewId = ''; state.ui.promptDialogGroupId = 'group-location'; state.promptGroups[0].options.find((option) => option.id === 'melbourne').selected = true;");
@@ -459,7 +478,7 @@ for (const [shotId, requiredPatterns] of [
   run("state.promptGroups.find((group) => group.id === 'group-shot').options.forEach((option) => { option.selected = option.id === '" + shotId + "'; });");
   const shotPrompt = run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)');
   for (const pattern of requiredPatterns) assert.match(shotPrompt, pattern, shotId + ': ' + pattern);
-  assert.match(shotPrompt, /冲突优先级：帐篷结构与地域场景硬约束 > 镜头景别与画布构图/);
+  assert.match(shotPrompt, /冲突优先级：出现人数与帐篷结构 > 地域场景硬约束 > 镜头景别与画布构图/);
   if (shotId === 'shot-wide') assert.match(shotPrompt, /环境必须主导画面面积，禁止为了突出产品而放大成中景/);
 }
 assert.match(run('renderPromptGroups()'), /远景 · 帐篷占 12%–25%/);
@@ -491,22 +510,22 @@ assert.equal(run('state.credits'), creditsBefore4K);
 await run(`generate4KResult(${JSON.stringify(sourceResultId)})`);
 assert.equal(run('state.batch.results.length'), 19);
 run("const savedV8 = structuredClone(seedState); savedV8.schemaVersion = 8; savedV8.promptGroups = savedV8.promptGroups.filter((group) => !['group-canvas', 'group-shot'].includes(group.id)); applySavedState(savedV8);");
-assert.equal(run('state.schemaVersion'), 13);
+assert.equal(run('state.schemaVersion'), 14);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-canvas")'), true);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-shot")'), true);
 run("const savedV9 = structuredClone(seedState); savedV9.schemaVersion = 9; savedV9.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt = '旧版远景提示词'; applySavedState(savedV9);");
-assert.equal(run('state.schemaVersion'), 13);
+assert.equal(run('state.schemaVersion'), 14);
 assert.match(run("state.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt"), /12%–25%/);
 run("const savedV10 = structuredClone(seedState); savedV10.schemaVersion = 10; savedV10.promptGroups.find((group) => group.id === 'group-location').options.find((option) => option.id === 'sydney').prompt = '旧版泛化悉尼背景'; applySavedState(savedV10);");
-assert.equal(run('state.schemaVersion'), 13);
+assert.equal(run('state.schemaVersion'), 14);
 assert.match(run("state.promptGroups.find((group) => group.id === 'group-location').options.find((option) => option.id === 'sydney').prompt"), /Sydney Opera House/);
 run("const savedV11 = structuredClone(seedState); savedV11.schemaVersion = 11; savedV11.publicPrompts.find((template) => template.id === 'family').prompt = '旧版多人玩耍'; savedV11.promptGroups.push({id: 'group-scene', name: '使用场景', enabled: true, options: [{id: 'group-scene-0', label: '儿童房', selected: true, quantity: 1}]}); applySavedState(savedV11);");
-assert.equal(run('state.schemaVersion'), 13);
-assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /只安排一名/);
-assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /身体一半在篷内/);
+assert.equal(run('state.schemaVersion'), 14);
+assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /人物数量完全服从“出现人数”选项/);
+assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /每名儿童都必须与帐篷发生/);
 assert.match(run("state.promptGroups.find((group) => group.id === 'group-scene').options.find((option) => option.label === '儿童房').prompt"), /同一透视/);
 assert.equal(run("state.promptGroups.find((group) => group.id === 'group-scene').options.filter((option) => option.label === '儿童房').length"), 1);
 run("const savedV12 = structuredClone(seedState); savedV12.schemaVersion = 12; savedV12.publicPrompts.find((template) => template.id === 'family').prompt = '旧版入口旁摆拍'; applySavedState(savedV12);");
-assert.equal(run('state.schemaVersion'), 13);
-assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /明确表现进入、阅读或整理入口的真实互动/);
+assert.equal(run('state.schemaVersion'), 14);
+assert.match(run("state.publicPrompts.find((template) => template.id === 'family').prompt"), /人物数量完全服从“出现人数”选项/);
 console.log('Studio canvas sizes, camera shots, 4K queue, other requirements and prompt confirmation tests passed.');

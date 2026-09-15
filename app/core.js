@@ -16,21 +16,21 @@
   const TEMPLATE_RECIPES = Object.freeze({
     'tpl-tent': Object.freeze({
       publicPromptId: 'brief',
-      enable: ['group-location', 'group-color', 'group-canvas', 'group-shot'],
+      enable: ['group-location', 'group-color', 'group-canvas', 'group-shot', 'group-people'],
       disable: [],
       add: [],
-      summary: '已启用地域、产品配色、画布和镜头景别的批量帐篷配方。',
+      summary: '已启用地域、产品配色、画布、镜头景别和出现人数的批量帐篷配方。',
     }),
     'tpl-product': Object.freeze({
       publicPromptId: 'white',
-      enable: ['group-color', 'group-canvas', 'group-shot'],
+      enable: ['group-color', 'group-canvas', 'group-shot', 'group-people'],
       disable: ['group-location', 'group-scene'],
       add: [],
-      summary: '已切换白底电商精修，并停用地域与场景背景。',
+      summary: '已切换白底电商精修，并停用地域与场景背景；人物仍按出现人数生成。',
     }),
     'tpl-scene': Object.freeze({
       publicPromptId: 'family',
-      enable: ['group-location', 'group-color', 'group-canvas', 'group-shot', 'group-scene'],
+      enable: ['group-location', 'group-color', 'group-canvas', 'group-shot', 'group-people', 'group-scene'],
       disable: [],
       add: ['group-scene'],
       summary: '已启用亲子生活摄影、当地背景和使用场景配方。',
@@ -107,30 +107,49 @@
     ].join('\n');
   }
 
-  function sceneRealismDirective(templatePrompt, otherRequirements, shotRule, product) {
-    if (/纯白背景/.test(templatePrompt)) {
-      return '【空间质检】白底产品图只保留一个真实地面接触面和自然接触阴影；帐篷不得悬浮、倾斜或改变结构。\n【人物数量硬约束｜0人】画面必须完全无人，不出现儿童、成人、人体局部、人物倒影、照片或屏幕人像；人物数量必须严格等于 0。\n不得出现任何场景道具。';
-    }
-    const userPeopleRequest = String(otherRequirements || '');
-    const userForbidsPeople = /不出现(?:任何)?人物|不要(?:添加|出现)?人物|不得出现人物|禁止出现人物|画面无人|无人场景|(?:0|零)\s*人/.test(userPeopleRequest);
-    const userRequestsPeople = /(?:一名|一个|1\s*名|1\s*个).{0,8}(?:儿童|孩子|人物|成人)|(?:儿童|孩子|人物|成人).{0,12}(?:阅读|玩耍|互动|坐|站|整理|进入|陪伴)/.test(userPeopleRequest);
-    const templateRequestsOnePerson = /只安排一名|只出现一名|最多一名儿童|亲子生活摄影/.test(templatePrompt);
-    const peopleRequested = !userForbidsPeople && (userRequestsPeople || templateRequestsOnePerson);
-    const audience = product?.specs?.audience ? `人物年龄与产品受众“${product.specs.audience}”一致` : '人物年龄与产品用途一致';
-    const personRule = !peopleRequested
+  function peopleCountFromRule(peopleRule) {
+    const value = String(peopleRule || '');
+    const marker = value.match(/【出现人数选择｜([0-3])人】/);
+    if (marker) return Number(marker[1]);
+    if (/无人物|严格\s*0\s*人/.test(value)) return 0;
+    const label = value.match(/([1-3])\s*名儿童/);
+    return label ? Number(label[1]) : null;
+  }
+
+  function sceneRealismDirective(templatePrompt, peopleRule, shotRule, product) {
+    const expectedPeople = peopleCountFromRule(peopleRule);
+    const peopleRequested = Number.isInteger(expectedPeople) && expectedPeople > 0;
+    const audienceSpec = String(product?.specs?.audience || '');
+    const audience = /岁|儿童|婴|幼/.test(audienceSpec) ? `人物年龄与产品受众“${audienceSpec}”一致` : '儿童年龄与帐篷的安全适用范围一致';
+    const exactCountRule = Number.isInteger(expectedPeople)
+      ? `人物总数必须严格等于 ${expectedPeople}，不得多或少；禁止成人、路人、远景人影、局部肢体、倒影及图像内人像。`
+      : '';
+    const interactions = {
+      1: '唯一儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外；一只手明确轻扶软质门帘边缘，头部和视线朝向帐篷内部。',
+      2: '儿童 A 坐在帐篷入口门槛并用一只手轻扶软质门帘；儿童 B 坐在篷内靠近入口的位置整理一只坐垫或打开一本书。两人的脸、身体与各自动作都必须清楚可见，并共同形成正在使用帐篷的关系。',
+      3: '儿童 A 坐在帐篷入口门槛并轻扶软质门帘；儿童 B 坐在篷内靠近入口的位置看一本打开的书；儿童 C 跪坐在入口外侧，把一只坐垫递向篷内。三人的位置相互错开、脸部可见，每个人都必须直接参与帐篷内外的同一项活动。',
+    };
+    const personRule = expectedPeople === 0
       ? '【人物数量硬约束｜0人】画面必须完全无人。不得出现儿童、成人、远景人影、路人、局部手脚、镜面或水面倒影中的人物，也不得在海报、照片或屏幕中出现人脸与人形；模型不得为了增加生活感自行添加人物。人物数量不是建议，而是验收条件：必须严格等于 0。'
-      : /环境远景|建立镜头/.test(shotRule)
-        ? `【人物数量硬约束｜1人】画面只允许一名儿童，人物数量必须严格等于 1，不得出现第二个人、路人、远景人影、局部手脚或人物倒影。${audience}，全身位于帐篷同一地面；远景不安排脸部特写，但可见五官不得糊成色块，不奔跑、不挥手。\n【人物互动硬约束｜必须可见】唯一儿童必须坐在帐篷入口门槛处，身体轮廓横跨篷内与篷外空间，一只手明确接触并轻扶软质门帘边缘，头部和视线朝向帐篷内部；即使在远景中也必须能辨认人与帐篷的接触关系。禁止儿童独立站在草地、与帐篷留有空隙、背对或忽视帐篷、仅在旁边摆拍。人物与帐篷的前后遮挡必须正确，手和四肢不得穿透面料。`
-        : `【人物数量硬约束｜1人】画面只允许一名儿童，人物数量必须严格等于 1，不得出现第二个人、路人、远景人影、局部手脚或人物倒影。${audience}，采用简单静止动作和三分之四侧脸；脸部与帐篷入口处于同一清晰焦平面，双眼、鼻子、嘴和脸部轮廓完整自然，无运动模糊。\n【人物互动硬约束｜必须可见】唯一儿童必须坐在帐篷入口门槛处，身体一半在篷内、一半在篷外；一只手明确接触并轻扶软质门帘边缘，另一只手自然放在膝上或打开的书本旁，头部和视线朝向帐篷内部。人与帐篷必须形成清楚的“进入、阅读或整理入口”互动，不得独立站在旁边摆拍、远离、背对或忽视帐篷。人物与帐篷的前后遮挡必须正确，手不得穿透面料，四肢不得被帐篷边缘错误切断；双手不得抓握复杂支架。`;
+      : peopleRequested
+        ? `【人物数量硬约束｜${expectedPeople}人】本张只允许 ${expectedPeople} 名儿童。${exactCountRule}${audience}；使用简单静止动作，所有人的完整五官和互动处在清晰焦平面，无运动模糊。\n【人物互动硬约束｜每个人都必须可见】${interactions[expectedPeople]}禁止任何人远离、背对、忽视帐篷或只在旁边摆拍。遮挡必须正确，肢体不得穿透面料；远景仍须能辨认每个人的互动。`
+        : '';
     const scale = product?.specs?.size
-      ? `帐篷按标称尺寸“${product.specs.size}”与${peopleRequested ? '唯一人物、' : ''}家具和建筑保持可信比例。`
-      : `帐篷与${peopleRequested ? '唯一人物、' : ''}家具和建筑保持可信比例。`;
+      ? `帐篷按标称尺寸“${product.specs.size}”与${peopleRequested ? '全部人物、' : ''}家具和建筑保持可信比例。`
+      : `帐篷与${peopleRequested ? '全部人物、' : ''}家具和建筑保持可信比例。`;
+    if (/纯白背景/.test(templatePrompt)) {
+      return [
+        '【空间质检】白底产品图只保留一个真实地面接触面和自然接触阴影；帐篷不得悬浮、倾斜或改变结构。',
+        personRule,
+        '不得出现任何场景道具。',
+      ].filter(Boolean).join('\n');
+    }
     return [
       '【真实空间与人物质检｜不可省略】整张图必须来自同一台相机、同一地面和同一个透视系统，不得使用拼贴、舞台布景或多个不一致视点。',
       `布局：先建立连续地面、水平线和单一消失点，再放置帐篷；${scale}帐篷支脚全部落地，接触阴影完整，不穿插地面、人物、家具或植物。主地标只在中远景出现。`,
-      `光影：全场只有一个主光方向；帐篷、${peopleRequested ? '唯一人物、' : ''}树木与建筑的受光面和投影方向一致，天空、空气透视和白平衡统一。除帐篷外最多保留两类简单道具，删除拥挤装饰。`,
+      `光影：全场只有一个主光方向；帐篷、${peopleRequested ? '全部人物、' : ''}树木与建筑的受光面和投影方向一致，天空、空气透视和白平衡统一。除帐篷外最多保留两类简单道具，删除拥挤装饰。`,
       personRule,
-      `成片：真实全画幅商业摄影，结构边缘和帐篷织物清晰${peopleRequested ? '，唯一人物的脸部清晰自然' : ''}；景深自然但不能用虚化掩盖错误，禁止广角拉伸、悬浮、比例错乱、重复肢体、蜡像皮肤和塑料质感。`,
+      `成片：真实全画幅商业摄影，结构边缘和帐篷织物清晰${peopleRequested ? '，每名人物的脸部清晰自然' : ''}；景深自然但不能用虚化掩盖错误，禁止广角拉伸、悬浮、比例错乱、重复肢体、蜡像皮肤和塑料质感。`,
     ].join('\n');
   }
 
@@ -142,9 +161,10 @@
       : sourceRules;
     const locationRule = ruleValue(rules, '当地背景');
     const shotRule = ruleValue(rules, '镜头景别');
+    const peopleRule = ruleValue(rules, '出现人数');
     const wideShot = /环境远景|建立镜头/.test(shotRule);
     const combination = rules
-      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('镜头景别：'))
+      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('镜头景别：') && !rule.startsWith('出现人数：'))
       .map((tag) => tag.replace('：', '要求为').replace(/[。；\s]+$/, ''))
       .join('；');
     return [
@@ -154,10 +174,10 @@
       locationDirective(locationRule, shotRule),
       shotRule ? `镜头景别硬性约束（不得自动折中成中景）：${shotRule}。若占比不符即视为生成失败。` : '',
       `场景任务：${template?.prompt || ''}`,
-      sceneRealismDirective(template?.prompt || '', state.studio.otherRequirements?.trim(), shotRule, product),
+      sceneRealismDirective(template?.prompt || '', peopleRule, shotRule, product),
       locationRule
-        ? '冲突优先级：帐篷结构与地域场景硬约束 > 镜头景别与画布构图 > 产品配色和其他明确要求 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。'
-        : '优先级：帐篷结构与明确要求 > 镜头景别与画布构图 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。',
+        ? '冲突优先级：出现人数与帐篷结构 > 地域场景硬约束 > 镜头景别与画布构图 > 产品配色和其他明确要求 > 场景模板 > 摄影美感。若其他文字涉及人物数量，以“出现人数”选项为唯一准则；所有“必须”元素都要可辨识。'
+        : '优先级：出现人数与帐篷结构 > 镜头景别与画布构图 > 其他明确要求 > 场景模板 > 摄影美感。若其他文字涉及人物数量，以“出现人数”选项为唯一准则；所有“必须”元素都要可辨识。',
       combination ? `其余创作规则：${combination}。产品配色只作用于帐篷面料；视觉风格不能覆盖产品结构、${locationRule ? '地域场景硬约束、' : ''}配色或场景模板。` : '',
       `画幅比例：${ratio}。画布方向与构图必须遵循所选尺寸。`,
       state.studio.otherRequirements?.trim() ? `其他要求：\n${state.studio.otherRequirements.trim()}` : '',

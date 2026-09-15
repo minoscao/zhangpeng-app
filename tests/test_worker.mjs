@@ -28,7 +28,7 @@ globalThis.fetch = async (input, init = {}) => {
     const request = JSON.parse(init.body);
     if (request.model === 'qwen3-vl-flash') {
       inspectionRequest = request;
-      return Response.json({ choices: [{ message: { content: JSON.stringify({ personCount: 2, childCount: 2, atTentEntrance: false, touchingTent: false, interactionVisible: false, extraPersonVisible: true, issues: ['出现第二名儿童', '人物没有接触帐篷'] }) } }] });
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ personCount: 2, childCount: 2, atTentEntrance: true, touchingTent: true, interactionVisible: true, allPeopleInteracting: true, extraPersonVisible: false, issues: [] }) } }] });
     }
     cityRequest = request;
     assert.ok(init.signal);
@@ -124,12 +124,21 @@ await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
   body: JSON.stringify({ prompt: '【人物数量硬约束｜1人】画面只允许一名儿童。', referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
 }), env);
-assert.match(qwenRequests.at(-1).parameters.negative_prompt, /第二个人/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /第2个人/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /额外人物/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物与帐篷无互动/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物在帐篷旁边摆拍/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /手穿透帐篷/);
 assert.match(qwenRequests.at(-1).input.messages[0].content.at(-1).text, /^【最高优先级｜先完成人物数量与互动/);
+
+await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: '【人物数量硬约束｜2人】画面只允许两名儿童。', referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /超过2名儿童/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /第3个人/);
+assert.match(qwenRequests.at(-1).input.messages[0].content.at(-1).text, /重新只安排 2 名儿童/);
 
 const generatedImageUrl = 'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/output/generated.png';
 const inspectionResponse = await worker.fetch(new Request('https://app.example/api/qwen/inspect-image', {
@@ -141,10 +150,29 @@ const inspection = await inspectionResponse.json();
 assert.equal(inspectionResponse.status, 200);
 assert.equal(inspection.pass, false);
 assert.equal(inspection.personCount, 2);
-assert.equal(inspection.interactionVisible, false);
+assert.equal(inspection.interactionVisible, true);
+assert.equal(inspection.allPeopleInteracting, true);
 assert.equal(inspectionRequest.response_format.type, 'json_object');
 assert.equal(inspectionRequest.enable_thinking, false);
 assert.equal(inspectionRequest.messages[0].content[0].image_url.url, generatedImageUrl);
+assert.match(inspectionRequest.messages[0].content[1].text, /allPeopleInteracting/);
+
+const twoPeopleInspectionResponse = await worker.fetch(new Request('https://app.example/api/qwen/inspect-image', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ imageUrl: generatedImageUrl, expectedPeople: 2 }),
+}), env);
+assert.equal(twoPeopleInspectionResponse.status, 200);
+const twoPeopleInspection = await twoPeopleInspectionResponse.json();
+assert.equal(twoPeopleInspection.expectedPeople, 2);
+assert.equal(twoPeopleInspection.pass, true);
+
+const unsupportedPeopleInspection = await worker.fetch(new Request('https://app.example/api/qwen/inspect-image', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ imageUrl: generatedImageUrl, expectedPeople: 4 }),
+}), env);
+assert.equal(unsupportedPeopleInspection.status, 400);
 
 const repairResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   method: 'POST',

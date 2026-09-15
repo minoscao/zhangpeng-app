@@ -45,13 +45,13 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 const PUBLIC_PROMPT_TEMPLATES = [
-  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。没有明确要求人物时不要自行添加人物，避免无意义地增加画面复杂度。' },
+  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。人物数量只服从“出现人数”选项，不得自行增减。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
   { id: 'cabin', name: '木屋自然庭院', prompt: '帐篷位于开阔自然庭院，后方必须有清楚可辨的真实小木屋、木质立面和自然植被。采用所选地区的住宅与景观风格，不要求城市地标；地域规则中的天际线是备选，不得替代本模板指定的小木屋。' },
-  { id: 'family', name: '亲子生活摄影', prompt: '只安排一名与产品适用年龄一致的儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外；一只手轻扶软质门帘边缘，另一只手自然放在膝上或打开的书本旁，头部与视线朝向帐篷内部，明确表现进入、阅读或整理入口的真实互动。人物和帐篷位于同一地面与清晰焦平面，三分之四侧脸的眼睛、鼻子、嘴和脸部轮廓清楚自然。帐篷关键开口与支架完整可见，必须落实所选城市背景与产品面料配色。禁止人物站在旁边摆拍、远离、背对或忽视帐篷；禁止多人拥挤、奔跑、挥手、遮脸、手穿透面料或双手抓握复杂支架。' },
-  { id: 'white', name: '白底电商精修', backgroundMode: 'none', prompt: '输出纯白背景真实产品摄影，帐篷完整居中且比例准确、面料纹理与接触阴影清晰。不出现人物、建筑、城市景观或道具；此模板不使用当地背景规则，只落实产品配色和产品细节。' },
+  { id: 'family', name: '亲子生活摄影', prompt: '人物数量完全服从“出现人数”选项。有人时，每名儿童都必须与帐篷发生清楚、简单且可验收的真实互动：位于入口、篷内或紧邻门槛处，身体或手与门帘、坐垫或篷内活动形成明确关系，头部与视线朝向帐篷或同伴正在进行的帐篷活动。人物和帐篷位于同一地面与清晰焦平面，三分之四侧脸的眼睛、鼻子、嘴和脸部轮廓清楚自然。帐篷关键开口与支架完整可见，必须落实所选城市背景与产品面料配色。禁止任何人站在旁边摆拍、远离、背对或忽视帐篷；禁止拥挤、奔跑、挥手、遮脸、手穿透面料或双手抓握复杂支架。' },
+  { id: 'white', name: '白底电商精修', backgroundMode: 'none', prompt: '输出纯白背景真实产品摄影，帐篷完整居中且比例准确、面料纹理与接触阴影清晰。不出现建筑、城市景观或道具；人物数量只服从“出现人数”选项。此模板不使用当地背景规则，只落实产品配色、产品细节与所选人数。' },
 ];
 const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
 const DEFAULT_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确。成片必须呈现精修过的真实商业摄影质感：自然可信、大气克制、光线高级、材质纹理清晰，童趣但不幼稚。主体完整，不添加文字、商标与水印。';
@@ -88,7 +88,7 @@ const VISUAL_STYLE_OPTIONS = [
     "label": "户外纪实",
     "category": "户外纪实",
     "description": "户外生活 · 可信自然、环境有地域感",
-    "prompt": "光线：采用与所选地区和场景一致的自然天光，太阳方向和地面阴影一致。\n色彩：保持植物、建筑与肤色真实，色彩清透克制，不做橙青电影调色。\n材质：保留户外使用中合理的布料张力和微褶皱，产品干净且高级。\n构图：自然平视、真实透视与尺度，产品在前景完整，当地地标清楚但不抢主体；人物只按模板要求出现。\n避免：避免过度虚化背景、脏旧产品、极端广角、旅游明信片式地标拼贴。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
+    "prompt": "光线：采用与所选地区和场景一致的自然天光，太阳方向和地面阴影一致。\n色彩：保持植物、建筑与肤色真实，色彩清透克制，不做橙青电影调色。\n材质：保留户外使用中合理的布料张力和微褶皱，产品干净且高级。\n构图：自然平视、真实透视与尺度，产品在前景完整，当地地标清楚但不抢主体；人物只按“出现人数”选项生成。\n避免：避免过度虚化背景、脏旧产品、极端广角、旅游明信片式地标拼贴。\n约束：仅调整摄影视觉语言，不改变帐篷结构、参考产品材质、产品配色、图案元素或所选地区。当地背景与公共模板优先，白底模板始终保持纯白且不添加场景。必须为精修真实商业摄影。",
     "selected": false,
     "quantity": 1
   },
@@ -154,11 +154,20 @@ const CORE_PROMPT_GROUPS = Object.freeze({
       Object.freeze({ id: 'shot-wide', label: '远景', description: '帐篷占 12%–25% · 地域环境主导', prompt: '景别必须是明显的环境远景或建立镜头，摄影机距离约 10–20 米，使用 24–35mm 等效广角焦段。帐篷完整置于画面下三分之一附近，占画面面积 12%–25%；环境占 75%–88%，必须清楚展示大面积前景、完整场地、天空或建筑天际线，让地域地标和空间尺度成为主要视觉信息，同时帐篷仍可辨认。帐篷四周至少保留一至两个帐篷宽度的环境空间。严禁把帐篷放大到 30% 以上，严禁返回近景或常规中景', selected: false, quantity: 1 }),
     ]),
   }),
+  'group-people': Object.freeze({
+    id: 'group-people', name: '出现人数', enabled: true,
+    options: Object.freeze([
+      Object.freeze({ id: 'people-none', label: '无人物', description: '严格 0 人 · 纯产品与场景', prompt: '【出现人数选择｜0人】本张严格不出现人物', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'people-one', label: '1 名儿童', description: '严格 1 人 · 独立使用帐篷', prompt: '【出现人数选择｜1人】本张严格出现 1 名儿童', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'people-two', label: '2 名儿童', description: '严格 2 人 · 分工互动清楚', prompt: '【出现人数选择｜2人】本张严格出现 2 名儿童', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'people-three', label: '3 名儿童', description: '严格 3 人 · 各自互动不拥挤', prompt: '【出现人数选择｜3人】本张严格出现 3 名儿童', selected: false, quantity: 1 }),
+    ]),
+  }),
   'group-scene': Object.freeze({
     id: 'group-scene', name: '使用场景', enabled: true,
     options: Object.freeze([
       Object.freeze({ id: 'scene-nursery', label: '儿童房', description: '真实住宅尺度 · 窗边活动区', prompt: '真实高端住宅儿童房的窗边活动区，帐篷完整落在平整地毯上；墙面、窗框和家具遵循同一透视，家具尺寸与帐篷相符。只保留地毯、矮书架两类简单陈设，不堆玩具，不做样板间或影棚布景', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'scene-reading', label: '阅读角', description: '安静自然 · 简洁坐垫与书本', prompt: '帐篷入口形成真实阅读角，只放一只坐垫和一本打开的书；物件完整落地且不穿插帐篷，空间留白充足。若要求人物，只安排一名儿童静坐阅读，避免复杂手势、遮脸和多人互动', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'scene-reading', label: '阅读角', description: '安静自然 · 简洁坐垫与书本', prompt: '帐篷入口形成真实阅读角，只放一只坐垫和一本打开的书；物件完整落地且不穿插帐篷，空间留白充足。人物数量服从“出现人数”选项；有人时每名儿童都围绕帐篷入口、篷内坐垫或书本形成清楚的阅读互动，避免复杂手势和遮脸', selected: false, quantity: 1 }),
       Object.freeze({ id: 'scene-backyard', label: '后院草地', description: '开阔真实 · 连续地面与自然植被', prompt: '真实家庭后院或开放庭院，连续平整草地从前景延伸至建筑，帐篷支脚稳定落地；仅保留一棵树和一组低矮灌木作为空间层次，不出现杂乱派对道具、假草皮、巨型植物或不合理围墙', selected: true, quantity: 1 }),
       Object.freeze({ id: 'scene-open-field', label: '开阔自然地', description: '梦幻空旷 · 真实户外尺度', prompt: '开阔、安静且真实的自然草甸或缓坡，视野通透，地形连续，天空和远景具有自然空气透视；帐篷落在可承重的平整草地上，只保留少量野花和远处树线，不出现奇幻漂浮物、舞台布景或不合比例的山体', selected: false, quantity: 1 }),
       Object.freeze({ id: 'scene-campsite', label: '露营营地', description: '规范营位 · 克制户外陈设', prompt: '真实合规的家庭露营营位，帐篷位于平整营位中央，地钉、风绳和通道位置合理；只保留折叠椅与小型露营灯两类道具，不出现明火、车辆穿插、密集装备或多个帐篷抢主体', selected: false, quantity: 1 }),
@@ -231,6 +240,7 @@ const seedState = {
     structuredClone(CORE_PROMPT_GROUPS['group-color']),
     structuredClone(CORE_PROMPT_GROUPS['group-canvas']),
     structuredClone(CORE_PROMPT_GROUPS['group-shot']),
+    structuredClone(CORE_PROMPT_GROUPS['group-people']),
   ],
   promptLibrary: [
     { id: 'group-scene', name: '使用场景', options: structuredClone(CORE_PROMPT_GROUPS['group-scene'].options) },
@@ -238,6 +248,7 @@ const seedState = {
     { id: 'group-style', name: '视觉风格', options: VISUAL_STYLE_OPTIONS.map((option) => option.label) },
     { id: 'group-canvas', name: '画布尺寸', options: CORE_PROMPT_GROUPS['group-canvas'].options.map((option) => option.label) },
     { id: 'group-shot', name: '镜头景别', options: CORE_PROMPT_GROUPS['group-shot'].options.map((option) => option.label) },
+    { id: 'group-people', name: '出现人数', options: CORE_PROMPT_GROUPS['group-people'].options.map((option) => option.label) },
   ],
   publicPrompts: PUBLIC_PROMPT_TEMPLATES,
   batchHistory: [],
@@ -314,7 +325,7 @@ function upgradeCorePromptGroups(groups) {
     const customOptions = existingOptions.filter((option) => !templateIds.has(option.id) && !templateLabels.has(option.label)).map((option) => ({ ...option, prompt: option.prompt || option.label, description: option.description || '自定义选项' }));
     return { ...structuredClone(template), enabled: group.enabled !== false, options: [...upgradedOptions, ...customOptions] };
   });
-  for (const id of ['group-canvas', 'group-shot']) {
+  for (const id of ['group-canvas', 'group-shot', 'group-people']) {
     if (!upgradedGroups.some((group) => group.id === id)) upgradedGroups.push(structuredClone(CORE_PROMPT_GROUPS[id]));
   }
   return upgradedGroups;
@@ -595,7 +606,12 @@ function renderPromptGroups() {
   if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。<button class="button button--secondary" data-action="open-location">添加当地背景</button></div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
     const options = selectedOptions(group);
-    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions"><button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button><button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button><button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button></div></article>`;
+    const requiredPeopleGroup = group.id === 'group-people';
+    const groupToggle = requiredPeopleGroup
+      ? '<button class="toggle-control" type="button" aria-pressed="true" disabled><span></span>必选</button>'
+      : `<button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button>`;
+    const deleteButton = requiredPeopleGroup ? '' : `<button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button>`;
+    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions">${groupToggle}<button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button>${deleteButton}</div></article>`;
   }).join('')}</div>${state.promptGroups.some((group) => group.id === 'group-location') ? '' : '<button class="button button--secondary" data-action="open-location">添加当地背景</button>'}`;
 }
 
@@ -720,7 +736,7 @@ function renderStudio() {
     <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><div class="batch-title-actions"><span class="draft-badge">自动保存</span>${renderBatchHistoryControl(batchRunning)}</div></div>
     ${renderStudioSettings(batchRunning)}
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
-    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
+    <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景生成地域线索；产品配色只改帐篷面料；出现人数严格控制每张图的人物总数。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
     <section class="other-requirements"><label for="studio-other-requirements">其他要求</label><textarea id="studio-other-requirements" maxlength="1200" rows="4" aria-describedby="other-requirements-help" placeholder="例如：帐篷上出现小恐龙与星星；孩子在入口旁阅读；保留当地地标，画面不要文字或水印。">${escapeHtml(state.studio.otherRequirements || '')}</textarea><p id="other-requirements-help">填写其他提示词、元素、构图或禁止项，会合并到每张图的总提示词，不增加生成数量。修改后需重新确认总提示词。</p></section>
     ${renderFinalPromptSection(batchRunning)}
     <div class="formula-bar"><div><span>本次生成计划</span><strong>${escapeHtml(formulaText())}</strong></div>${renderGenerationControls(false, batchRunning || generationStarting || !total || total > MAX_BATCH_SIZE)}</div>${total > MAX_BATCH_SIZE ? `<p class="inline-error">单批最多 ${MAX_BATCH_SIZE} 张，请减少产品或提示词组合。</p>` : ''}
@@ -814,7 +830,8 @@ function renderPromptDialog() {
   if (!group) return '';
   if (group.id === 'group-location') return renderLocationEditor(group);
   if (group.id === 'group-style') return renderStyleEditor(group);
-  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : group.id === 'group-shot' ? '三种景别按帐篷画面占比严格区分；可同时勾选，批量生成明显不同的构图。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+  const customOptionForm = group.id === 'group-people' ? '' : `<div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div>`;
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : group.id === 'group-shot' ? '三种景别按帐篷画面占比严格区分；可同时勾选，批量生成明显不同的构图。' : group.id === 'group-people' ? '可多选生成不同人数的独立组合。只有“无人物”会加入严格无人约束；选择儿童人数后，最终提示词会锁定对应数量并要求每名儿童与帐篷互动。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div>${customOptionForm}<div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
 function renderRegionPreview() {
@@ -1115,16 +1132,20 @@ function generationPrompt(product, tags, promptDetails = [], ratio = state.studi
 }
 
 function expectedPeopleForPrompt(prompt) {
-  if (String(prompt || '').includes('【人物数量硬约束｜1人】')) return 1;
-  if (String(prompt || '').includes('【人物数量硬约束｜0人】')) return 0;
-  return null;
+  const match = String(prompt || '').match(/【人物数量硬约束｜([0-3])人】/);
+  return match ? Number(match[1]) : null;
 }
 
 function qwenRepairPrompt(result, expectedPeople, inspection) {
   const issues = Array.isArray(inspection?.issues) && inspection.issues.length ? inspection.issues.join('；') : '人物数量或互动关系不合格';
   const originalLimit = result.generationMode === 'wan' ? 900 : 3600;
-  const repairRule = expectedPeople === 1
-    ? '【人物数量硬约束｜1人】先删除输入图片中的全部现有人物，再重新只放置 1 名儿童，不得保留或复制原人物。【人物互动硬约束｜必须可见】唯一儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外；一只手明确接触并轻扶软质门帘边缘，视线朝向帐篷内部。禁止第二个人、远景人影、人物倒影、局部肢体；禁止站在帐篷旁边摆拍、远离、背对或忽视帐篷。手不得穿透面料，人物与入口的前后遮挡必须正确。'
+  const interactionByCount = {
+    1: '唯一儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外，一只手轻扶软质门帘，视线朝向篷内。',
+    2: '儿童 A 坐在入口门槛并轻扶门帘；儿童 B 坐在篷内靠近入口处整理坐垫或看打开的书。两人的脸与动作都清楚可见。',
+    3: '儿童 A 坐在入口门槛并轻扶门帘；儿童 B 在篷内靠近入口处看打开的书；儿童 C 跪坐在入口外侧把坐垫递向篷内。三人的位置错开且脸部清楚。',
+  };
+  const repairRule = expectedPeople > 0
+    ? `【人物数量硬约束｜${expectedPeople}人】先删除输入图片中的全部现有人物，再重新只放置 ${expectedPeople} 名儿童，不得保留或复制原人物，总人数必须严格等于 ${expectedPeople}。【人物互动硬约束｜每个人都必须可见】${interactionByCount[expectedPeople]}每名儿童都必须直接参与帐篷内外活动；禁止额外人物、远景人影、人物倒影、局部肢体，禁止任何人站在帐篷旁边摆拍、远离、背对或忽视帐篷。手不得穿透面料，人物与入口的前后遮挡必须正确。`
     : '【人物数量硬约束｜0人】删除输入图片中的所有儿童、成人、路人、远景人影、人物剪影、局部肢体、人物倒影以及照片或屏幕中的人物；自然修复被删除区域，最终人物总数严格等于 0。';
   return `【自动质检修复任务｜直接编辑输入图片】质检发现：${issues}。${repairRule}\n保持输入图片中的帐篷结构、面料、构图、光线、地域背景和地标不变，不重新设计帐篷，不增加道具、文字、商标或水印。\n原始任务关键要求：\n${String(result.prompt || '').slice(0, originalLimit)}`;
 }
@@ -1713,8 +1734,8 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'open-prompt-library') { rememberFocus(); state.ui.promptDialogGroupId = 'library'; render(); focusOverlay(); }
   if (action === 'edit-prompt-group') { rememberFocus(); state.ui.promptDialogGroupId = button.dataset.id; render(); focusOverlay(); }
-  if (action === 'toggle-prompt-group') { const group = state.promptGroups.find((item) => item.id === button.dataset.id); if (group) { group.enabled = !group.enabled; markRecipeCustomized(); } saveState(); render(); }
-  if (action === 'delete-prompt-group') { state.promptGroups = state.promptGroups.filter((item) => item.id !== button.dataset.id); markRecipeCustomized(); saveState(); render(); }
+  if (action === 'toggle-prompt-group') { const group = state.promptGroups.find((item) => item.id === button.dataset.id); if (group && group.id !== 'group-people') { group.enabled = !group.enabled; markRecipeCustomized(); } saveState(); render(); }
+  if (action === 'delete-prompt-group' && button.dataset.id !== 'group-people') { state.promptGroups = state.promptGroups.filter((item) => item.id !== button.dataset.id); markRecipeCustomized(); saveState(); render(); }
   if (action === 'add-library-group') {
     const source = state.promptLibrary.find((item) => item.id === button.dataset.id);
     if (source && !state.promptGroups.some((item) => item.id === source.id)) {
@@ -1733,6 +1754,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'toggle-prompt-option') {
     const group = state.promptGroups.find((item) => item.id === button.dataset.groupId); const option = group?.options.find((item) => item.id === button.dataset.id);
+    if (group?.id === 'group-people' && option?.selected && selectedOptions(group).length === 1) { showToast('至少保留一个人数选项', '不需要人物时请选择“无人物”。'); return; }
     if (option) option.selected = !option.selected;
     if (group?.id === 'group-location' && option?.selected) regionPreviewId = option.id;
     if (group?.id === 'group-style' && option?.selected) openStylePrompt(option);
