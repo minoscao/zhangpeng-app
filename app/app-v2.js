@@ -42,7 +42,7 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const PUBLIC_PROMPT_TEMPLATES = [
   { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和补充要求；不能用漂亮但无关的背景代替指定环境。要求的背景元素必须看得清，不可用过度虚化隐藏。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
@@ -146,9 +146,9 @@ const CORE_PROMPT_GROUPS = Object.freeze({
   'group-shot': Object.freeze({
     id: 'group-shot', name: '镜头景别', enabled: true,
     options: Object.freeze([
-      Object.freeze({ id: 'shot-close', label: '近景', description: '突出面料、开口和产品细节', prompt: '采用产品近景，帐篷占画面约 70%–85%，重点呈现面料、开口、缝线和支架细节，同时保持产品主体完整不裁切', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'shot-medium', label: '中景', description: '产品与使用环境平衡', prompt: '采用平视中景，帐篷占画面约 45%–65%，产品结构完整清楚，并保留足够环境说明使用场景和地域特征', selected: true, quantity: 1 }),
-      Object.freeze({ id: 'shot-wide', label: '远景', description: '强调地域环境与空间氛围', prompt: '采用真实远景或环境全景，帐篷占画面约 25%–40%，完整可辨且仍是视觉核心，清楚呈现当地环境和空间层次，避免主体过小', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'shot-close', label: '近景', description: '帐篷占 80%–95% · 产品细节主导', prompt: '景别必须是明显的产品近景特写，摄影机距离约 1–2 米，使用 65–85mm 等效焦段的紧凑透视。帐篷主体占画面面积 80%–95%，入口、面料纹理、包边、缝线和支架连接清晰可见；帐篷轮廓贴近画面边缘，允许极少量外轮廓自然越界，但不得裁掉入口和关键结构。环境只占 5%–20%，仅作为虚化或局部可辨的地点线索。严禁拉远成完整环境展示，严禁帐篷占比低于 75%，不要中景或广角全景', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'shot-medium', label: '中景', description: '帐篷占 45%–60% · 产品环境平衡', prompt: '景别必须是标准产品中景，摄影机距离约 3–5 米，使用 45–55mm 等效标准焦段和平视透视。帐篷完整呈现，占画面面积 45%–60%，四周保留约半个帐篷宽度的环境空间；产品结构和使用场景同等清楚，人物如出现应与帐篷形成真实互动。严禁贴边特写，也严禁帐篷缩小到画面 35% 以下；不要近景裁切或远景全景', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'shot-wide', label: '远景', description: '帐篷占 12%–25% · 地域环境主导', prompt: '景别必须是明显的环境远景或建立镜头，摄影机距离约 10–20 米，使用 24–35mm 等效广角焦段。帐篷完整置于画面下三分之一附近，占画面面积 12%–25%；环境占 75%–88%，必须清楚展示大面积前景、完整场地、天空或建筑天际线，让地域地标和空间尺度成为主要视觉信息，同时帐篷仍可辨认。帐篷四周至少保留一至两个帐篷宽度的环境空间。严禁把帐篷放大到 30% 以上，严禁返回近景或常规中景', selected: false, quantity: 1 }),
     ]),
   }),
 });
@@ -331,7 +331,7 @@ function saveStylePrompt() {
 }
 
 function applySavedState(saved) {
-  if (![6, 7, 8, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
+  if (![6, 7, 8, 9, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
     state.schemaVersion = CURRENT_SCHEMA_VERSION;
@@ -510,7 +510,7 @@ function renderPromptGroups() {
   if (!state.promptGroups.length) return '<div class="empty-inline">还没有提示词组。<button class="button button--secondary" data-action="open-location">添加当地背景</button></div>';
   return `<div class="prompt-group-list">${state.promptGroups.map((group) => {
     const options = selectedOptions(group);
-    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip">${escapeHtml(option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions"><button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button><button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button><button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button></div></article>`;
+    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${options.length ? `${groupFactor(group)} 个组合值` : '未选择选项'}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions"><button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button><button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button><button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button></div></article>`;
   }).join('')}</div>${state.promptGroups.some((group) => group.id === 'group-location') ? '' : '<button class="button button--secondary" data-action="open-location">添加当地背景</button>'}`;
 }
 
@@ -699,7 +699,7 @@ function renderPromptDialog() {
   if (!group) return '';
   if (group.id === 'group-location') return renderLocationEditor(group);
   if (group.id === 'group-style') return renderStyleEditor(group);
-  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor" role="dialog" aria-modal="true" aria-labelledby="prompt-editor-title"><div class="modal-header"><div><h2 id="prompt-editor-title">编辑“${escapeHtml(group.name)}”</h2><p>${group.id === 'group-location' ? '每个地点会自动加入可识别的当地环境线索，地标只作远景，不会抢产品主体。' : group.id === 'group-color' ? '配色只改变帐篷面料，不会给人物、背景或整张画面套色。' : group.id === 'group-shot' ? '三种景别按帐篷画面占比严格区分；可同时勾选，批量生成明显不同的构图。' : '勾选词条并设置数量；数量会参与最终组合计算。'}</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组编辑">${svgIcon('x')}</button></div><div class="option-editor-list">${group.options.map((option) => `<div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}"><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ''}</span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量">−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量">＋</button></div></div>`).join('')}</div><div class="new-option-form"><label for="new-option-label">新增词条</label><div><input id="new-option-label" class="input-control" placeholder="输入新的提示词选项"><button class="button button--secondary" data-action="add-prompt-option" data-group-id="${group.id}">添加</button></div></div><div class="modal-actions"><span class="selection-count">当前 ${groupFactor(group)} 个组合值</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
 }
 
 function renderRegionPreview() {
@@ -1002,19 +1002,23 @@ function openApiKeyDialog(provider = state.studio.provider, action = '') {
 function generationPrompt(product, tags, promptDetails = [], ratio = state.studio.ratio) {
   const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
   const rules = template?.id === 'white' || template?.backgroundMode === 'none' ? (promptDetails.length ? promptDetails : tags).filter((tag) => !tag.startsWith('当地背景：')) : (promptDetails.length ? promptDetails : tags);
+  const shotRule = rules.find((rule) => rule.startsWith('镜头景别：'))?.replace(/^镜头景别：/, '') || '';
+  const wideShot = /环境远景|建立镜头/.test(shotRule);
   const combination = rules.map((tag) => tag.replace('：', '要求为').replace(/[。；\\s]+$/, '')).join('；');
   return [
     '请基于输入参考图生成一张精修完成、真实大气的儿童帐篷商业摄影成片。成片必须像专业摄影团队实景拍摄并经过高端广告后期，而不是插画、3D 渲染、平面示意图或低成本影棚合成。',
-    `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
+    wideShot ? `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面中唯一的商业产品；本张为远景，环境必须主导画面面积，禁止为了突出产品而放大成中景。` : `参考产品为“${product.name}”（SKU ${product.sku}），帐篷是画面唯一核心产品。`,
+    shotRule ? `镜头景别硬性约束（最高构图优先级，不得自动折中成中景）：${shotRule}。必须同时满足摄影距离、等效焦段、帐篷画面占比和环境占比；若占比不符即视为生成失败。` : '',
     '严格保留参考图中帐篷的真实结构、轮廓、开口、支架、缝线和比例，不改变产品类型，不凭空增加门窗或配件。',
     `场景任务：${template?.prompt || ''}`,
-    '验收优先级：产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
+    '验收优先级：镜头景别与画布构图 > 产品结构与明确需求 > 场景模板指定元素 > 地域备选线索 > 摄影美感。所有“必须”元素要在画面中可辨识，不能用美感替代需求。',
     combination ? `本张创作规则：${combination}。各项规则必须同时满足；当地背景作为真实环境线索，产品配色只作用于帐篷面料，视觉风格仅控制摄影语言，不覆盖产品配色、指定地标或场景模板。` : '',
     `画幅比例：${ratio}。画布方向与构图必须遵循所选画布尺寸。`,
     state.studio.otherRequirements?.trim() ? `其他要求（每张图共用，保留用户原意并与上述要求共同落实）：\n${state.studio.otherRequirements.trim()}` : '',
     state.studio.universalPrompt,
     '摄影标准：全画幅商业摄影质感，光线自然且有方向，曝光准确，白平衡真实，透视和空间尺度合理；构图舒展大气，背景有层次但不过度虚化，不使用夸张 HDR、浓重滤镜或虚假光效。',
     '产品质感：清楚表现织物纤维、包边、缝线、褶皱张力和支架材质；边缘干净、接触阴影可信，避免塑料感、蜡感、过度磨皮、结构变形和悬浮感。',
+    shotRule ? '景别验收：生成前再次检查帐篷在画面中的面积比例与四周环境留量，必须与所选近景、中景或远景对应；不得为了同时展示产品和背景而默认使用中景。' : '',
     '整体适合国际儿童用品品牌、电商主视觉与高端产品手册；如出现儿童或家庭人物，动作自然、比例正确且不得遮挡帐篷关键结构。',
   ].filter(Boolean).join('\n');
 }

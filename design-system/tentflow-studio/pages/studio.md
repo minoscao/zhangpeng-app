@@ -30,13 +30,15 @@
 
 ### Component Overrides
 
-- No overrides — use Master component specs
+- 镜头景别选项必须在辅助说明中直接显示产品占画面比例：近景 80%–95%、中景 45%–60%、远景 12%–25%。
+- 最终提示词把所选景别作为最高构图优先级，明确摄影距离、等效焦段、产品占比、环境占比和禁止回落的景别。
+- 用户修改景别后，最终提示词确认状态必须回到“待确认”。
 
 ---
 
 ## Page-Specific Components
 
-- No unique components for this page
+- `shot-distance-option`: 景别名称 + 可量化的产品画面占比 + 对应构图硬约束。
 
 ---
 

@@ -64,7 +64,7 @@ assert.equal(run('state.batch.results[0].status'), 'failed');
 assert.match(run('state.batch.results[0].error'), /可能已计费/);
 
 run('state = structuredClone(seedState); state.schemaVersion = 7; state.studio.generationMode = "fast"; applySavedState(structuredClone(state));');
-assert.equal(run('state.schemaVersion'), 9);
+assert.equal(run('state.schemaVersion'), 10);
 assert.equal(run('state.studio.generationMode'), 'fast');
 assert.equal(run('state.savedAssets.every((asset) => asset.demo)'), true);
 assert.equal(run('state.promptGroups[0].options.some((option) => option.id === "melbourne")'), true);
@@ -331,12 +331,28 @@ assert.equal(run('state.studio.otherRequirements'), '');
 assert.equal(run('state.promptGroups.find((group) => group.id === "group-canvas").options.length'), 5);
 assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-canvas").options.map((option) => option.ratio)'), ['4:3', '16:9', '3:4', '9:16', '1:1']);
 assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-shot").options.map((option) => option.label)'), ['近景', '中景', '远景']);
+assert.deepEqual(run('state.promptGroups.find((group) => group.id === "group-shot").options.map((option) => option.description)'), ['帐篷占 80%–95% · 产品细节主导', '帐篷占 45%–60% · 产品环境平衡', '帐篷占 12%–25% · 地域环境主导']);
+for (const [shotId, requiredPatterns] of [
+  ['shot-close', [/最高构图优先级/, /1–2 米/, /65–85mm/, /80%–95%/, /环境只占 5%–20%/, /不要中景或广角全景/]],
+  ['shot-medium', [/最高构图优先级/, /3–5 米/, /45–55mm/, /45%–60%/, /不要近景裁切或远景全景/]],
+  ['shot-wide', [/最高构图优先级/, /10–20 米/, /24–35mm/, /12%–25%/, /环境占 75%–88%/, /严禁返回近景或常规中景/]],
+]) {
+  run("state.promptGroups.find((group) => group.id === 'group-shot').options.forEach((option) => { option.selected = option.id === '" + shotId + "'; });");
+  const shotPrompt = run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)');
+  for (const pattern of requiredPatterns) assert.match(shotPrompt, pattern, shotId + ': ' + pattern);
+  assert.match(shotPrompt, /不得为了同时展示产品和背景而默认使用中景/);
+  assert.match(shotPrompt, /验收优先级：镜头景别与画布构图/);
+  if (shotId === 'shot-wide') assert.match(shotPrompt, /环境必须主导画面面积，禁止为了突出产品而放大成中景/);
+}
+assert.match(run('renderPromptGroups()'), /远景 · 帐篷占 12%–25%/);
+run("state.ui.promptDialogGroupId = 'group-shot';");
+assert.match(run('renderPromptDialog()'), /三种景别按帐篷画面占比严格区分/);
 assert.equal(run('plannedTotal()'), 18);
 run("state.promptGroups.find((group) => group.id === 'group-canvas').options.forEach((option) => { option.selected = option.id === 'canvas-16-9'; }); state.promptGroups.find((group) => group.id === 'group-shot').options.forEach((option) => { option.selected = option.id === 'shot-wide'; });");
 assert.equal(run('plannedTotal()'), 18);
 assert.equal(run('buildCombinations()[0].ratio'), '16:9');
 assert.match(run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)'), /画幅比例：16:9/);
-assert.match(run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)'), /环境全景/);
+assert.match(run('generationPrompt(selectedProducts()[0], buildCombinations()[0].tags, buildCombinations()[0].promptDetails, buildCombinations()[0].ratio)'), /环境远景或建立镜头/);
 run('confirmedPromptReviews = {batch: null, comparison: null}; preparePromptReview(); confirmCurrentPromptReview(); submitOpenAiBatch = async (results) => { results.forEach((item) => { item.status = "ready"; item.image = "data:image/jpeg;base64,aW1hZ2U="; }); activeGenerationId = ""; state.batch.status = "ready"; };');
 await run('startBatchGeneration()');
 assert.equal(run('new Set(state.batch.results.map((item) => item.ratio)).size'), 1);
@@ -357,7 +373,10 @@ assert.equal(run('state.credits'), creditsBefore4K);
 await run(`generate4KResult(${JSON.stringify(sourceResultId)})`);
 assert.equal(run('state.batch.results.length'), 19);
 run("const savedV8 = structuredClone(seedState); savedV8.schemaVersion = 8; savedV8.promptGroups = savedV8.promptGroups.filter((group) => !['group-canvas', 'group-shot'].includes(group.id)); applySavedState(savedV8);");
-assert.equal(run('state.schemaVersion'), 9);
+assert.equal(run('state.schemaVersion'), 10);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-canvas")'), true);
 assert.equal(run('state.promptGroups.some((group) => group.id === "group-shot")'), true);
+run("const savedV9 = structuredClone(seedState); savedV9.schemaVersion = 9; savedV9.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt = '旧版远景提示词'; applySavedState(savedV9);");
+assert.equal(run('state.schemaVersion'), 10);
+assert.match(run("state.promptGroups.find((group) => group.id === 'group-shot').options.find((option) => option.id === 'shot-wide').prompt"), /12%–25%/);
 console.log('Studio canvas sizes, camera shots, 4K queue, other requirements and prompt confirmation tests passed.');
