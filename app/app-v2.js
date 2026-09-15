@@ -243,7 +243,7 @@ const seedState = {
   batchHistory: [],
   studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', otherRequirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
-  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false, exportScope: 'all', exportTarget: '', exportFormat: 'original' },
+  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false, batchAuditOpen: false, exportScope: 'all', exportTarget: '', exportFormat: 'original' },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
 };
 
@@ -646,11 +646,20 @@ function evaluationOption(value, current, label) { return `<option value="${valu
 function renderResultEvaluation(item) {
   const evaluation = { ...Core.emptyEvaluation(), ...(item.evaluation || {}) };
   const binaryOptions = (current, allowNA = false) => `${evaluationOption('pending', current, '待检查')}${evaluationOption('pass', current, '通过')}${evaluationOption('fail', current, '不通过')}${allowNA ? evaluationOption('na', current, '不适用') : ''}`;
-  return `<fieldset class="quality-rubric"><legend>交付验收 · ${item.review === 'pass' ? '可保存' : item.review === 'fail' ? '需重做' : '待完成'}</legend><label>产品结构保真<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="structure">${[0, 1, 2, 3, 4, 5].map((score) => `<option value="${score}" ${Number(evaluation.structure) === score ? 'selected' : ''}>${score ? `${score} / 5` : '待评分'}</option>`).join('')}</select></label><label>地域线索<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="location">${binaryOptions(evaluation.location, true)}</select></label><label>镜头景别<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="shot">${binaryOptions(evaluation.shot, true)}</select></label><label>明显缺陷<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="defects">${binaryOptions(evaluation.defects)}</select></label><label>可直接交付<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="deliverable">${binaryOptions(evaluation.deliverable)}</select></label></fieldset>`;
+  return `<fieldset class="quality-rubric"><legend>交付验收 · ${item.review === 'pass' ? '可保存' : item.review === 'fail' ? '需重做' : '待完成'}</legend><label>产品结构保真<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="structure">${[0, 1, 2, 3, 4, 5].map((score) => `<option value="${score}" ${Number(evaluation.structure) === score ? 'selected' : ''}>${score ? `${score} / 5` : '待评分'}</option>`).join('')}</select></label><label>地域线索<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="location">${binaryOptions(evaluation.location, true)}</select></label><label>镜头景别<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="shot">${binaryOptions(evaluation.shot, true)}</select></label><label>人物数量<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="people">${binaryOptions(evaluation.people)}</select></label><label>明显缺陷<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="defects">${binaryOptions(evaluation.defects)}</select></label><label>可直接交付<select class="select-control" data-result-evaluation="${escapeHtml(item.id)}" data-field="deliverable">${binaryOptions(evaluation.deliverable)}</select></label></fieldset>`;
+}
+
+function renderBatchHistoryControl(batchRunning) {
+  if (!state.batchHistory.length) return '';
+  return `<label class="batch-history-control" for="batch-history"><span>历史批次</span><select id="batch-history" class="select-control" ${batchRunning ? 'disabled' : ''}><option value="">选择历史批次</option>${state.batchHistory.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.id)} · ${batch.results.length} 张 · ${escapeHtml(batch.startedAt)}</option>`).join('')}</select></label>`;
+}
+
+function renderResultSummaryStrip() {
+  return `<div class="result-summary-strip" aria-label="当前批次结果统计"><span><strong>${batchReadyCount()}</strong> 完成</span><span><strong>${batchApprovedCount()}</strong> 已验收</span><span><strong>${batchFailedCount()}</strong> 失败</span><span><strong>${batchDelayedCount()}</strong> 待查询</span></div>`;
 }
 
 function renderBatchTools() {
-  return `<div class="batch-tools"><p>当前结果：${batchReadyCount()} 张完成 · ${batchApprovedCount()} 张通过验收 · ${batchFailedCount()} 张失败 · ${batchDelayedCount()} 张待查询。点击图片放大检查；“4K 尺寸版”仅扩大像素尺寸，不会增加模型细节，也不扣积分。</p>${state.batchHistory.length ? `<label for="batch-history">历史实际批次</label><select id="batch-history" class="select-control"><option value="">选择历史批次</option>${state.batchHistory.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.id)} · ${batch.results.length} 张 · ${escapeHtml(batch.startedAt)}</option>`).join('')}</select>` : ''}<details open><summary>本批次提示词与交付验收</summary>${state.batch.results.map((item, index) => `<div class="result-audit"><strong>${variantLabel(index)} · ${escapeHtml(item.productSnapshot?.sku || productById(item.productId)?.sku)} · ${escapeHtml(item.model || item.generationMode || '旧批次')}</strong><p>${escapeHtml(item.tags.join(' · '))}</p>${item.status === 'ready' ? renderResultEvaluation(item) : ''}<details class="result-prompt-details"><summary>查看实际提示词</summary><pre>${escapeHtml(item.prompt || '旧批次未保存完整提示词；新批次会记录。')}</pre></details></div>`).join('')}</details></div>`;
+  return `<div class="batch-tools"><details id="batch-audit-details" ${state.ui.batchAuditOpen ? 'open' : ''}><summary><span>本批次提示词与交付验收</span><small>${state.batch.results.length} 张结果 · 点击展开检查</small></summary><div class="batch-audit-list">${state.batch.results.map((item, index) => `<div class="result-audit"><strong>${variantLabel(index)} · ${escapeHtml(item.productSnapshot?.sku || productById(item.productId)?.sku)} · ${escapeHtml(item.model || item.generationMode || '旧批次')}</strong><p>${escapeHtml(item.tags.join(' · '))}</p>${item.status === 'ready' ? renderResultEvaluation(item) : ''}<details class="result-prompt-details"><summary>查看实际提示词</summary><pre>${escapeHtml(item.prompt || '旧批次未保存完整提示词；新批次会记录。')}</pre></details></div>`).join('')}</div></details></div>`;
 }
 
 function renderResultGroups() {
@@ -708,7 +717,7 @@ function renderStudio() {
   const durationValue = batchActive ? `${elapsedMinutes(state.batch.startedAtMs, state.batch.finishedAtMs)} 分钟` : estimatedDuration(total);
   const submissionNote = batchRunning && state.batch.nextSubmissionAt ? `按平台限速等待下一组提交，已提交的图片仍在同步查询。` : '';
   return `<section class="page page--batch"><div class="batch-layout"><div class="batch-main">
-    <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><span class="draft-badge">自动保存</span></div>
+    <div class="batch-title"><div><h2>批量创作配方</h2><p>选择多张产品参考图与提示词组合，确认后按 SKU 批量生产素材。</p></div><div class="batch-title-actions"><span class="draft-badge">自动保存</span>${renderBatchHistoryControl(batchRunning)}</div></div>
     ${renderStudioSettings(batchRunning)}
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">1</span><div><h3>选择参考产品图</h3><p>可同时选择多个 SKU 的图片参与创作，生成过程不锁定产品规格。</p></div></div>${renderSelectedProducts()}</section>
     <section class="workflow-section"><div class="workflow-heading"><span class="step-badge">2</span><div><h3>选择提示词组合</h3><p>当地背景会生成地域环境线索；产品配色只改变帐篷面料。</p></div></div>${renderPublicPromptArea()}${renderPromptGroups()}<button class="add-group-button" data-action="open-prompt-library">${svgIcon('plus')}添加提示词组</button></section>
@@ -719,7 +728,7 @@ function renderStudio() {
     <div class="run-panel-head"><div><h3>生成计划</h3><p>${batchActive ? `批次 ${escapeHtml(state.batch.id)} · ${activeProviderConfig.shortName} · ${profile.name}` : `${activeProviderConfig.shortName} · ${profile.model} · ${profile.name}`}</p></div>${batchActive ? statusChip(batchStatusLabel()) : ''}</div>
     <div class="estimate-grid"><div>${svgIcon('database')}<span><small>预计消耗</small><strong>${batchActive ? state.batch.results.length * CREDIT_PER_IMAGE : batchCost()} 积分</strong></span></div><div>${svgIcon('clock')}<span><small>${batchActive ? (batchRunning ? '已耗时' : '生成用时') : '预计耗时'}</small><strong>${durationValue}</strong></span></div></div>
     <div class="progress-block"><div class="progress-copy"><span>生成进度</span><strong>${batchActive ? `${batchSettledCount()} / ${state.batch.results.length}` : '尚未开始'}</strong></div>${submissionNote ? `<p class="muted-copy">${escapeHtml(submissionNote)}</p>` : ''}<div class="progress-track"><span style="width:${progress}%"></span></div><ol class="progress-steps"><li class="${batchActive ? 'is-active' : ''}"><b>1</b>创建任务</li><li class="${progress > 0 ? 'is-active' : ''}"><b>2</b>生成素材</li><li class="${state.batch.status === 'ready' || state.batch.status === 'saved' ? 'is-active' : ''}"><b>3</b>确认保存</li></ol></div>
-    ${batchActive || state.batchHistory.length ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '验收已确认' : `确认 ${batchApprovedCount()} 张验收通过`}</button><p>每张成功图片会立即进入素材库，并随验收状态更新；${activeProvider === 'qwen' ? '千问 / 万相结果链接仅保留 24 小时，请及时下载备份。' : 'OpenAI 图片请及时下载备份。'}</p></div>` : ''}
+    ${batchActive ? renderBatchTools() : ''}<div class="result-scroll" aria-live="polite">${batchActive ? renderResultSummaryStrip() : ''}${renderResultGroups()}</div>${batchActive ? `<div class="run-footer"><button class="button button--primary" data-action="save-batch" ${batchApprovedCount() ? '' : 'disabled'}>${svgIcon('folder')}${state.batch.status === 'saved' ? '验收已确认' : `确认 ${batchApprovedCount()} 张验收通过`}</button><p>成功图片自动进入素材库；${activeProvider === 'qwen' ? '千问链接仅保留 24 小时，请及时下载。' : '请及时下载备份。'}</p></div>` : ''}
   </aside></div></section>`;
 }
 
@@ -1372,6 +1381,7 @@ async function startBatchGeneration() {
   state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
+  state.ui.batchAuditOpen = false;
   saveState(); render();
   if (provider === 'openai') await submitOpenAiBatch(results, state.batch.id);
   else {
@@ -1775,7 +1785,7 @@ document.addEventListener('change', (event) => {
   if (event.target.id === 'export-format') { state.ui.exportFormat = event.target.value; exportRuntime.error = ''; exportRuntime.message = ''; saveState(); render(); return; }
   if (event.target.id === 'batch-history' && event.target.value && state.batch.status !== 'generating') {
     const index = state.batchHistory.findIndex((batch) => batch.id === event.target.value);
-    if (index >= 0) { const chosen = state.batchHistory.splice(index, 1)[0]; if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch)); state.batch = chosen; saveState(); render(); }
+    if (index >= 0) { const chosen = state.batchHistory.splice(index, 1)[0]; if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch)); state.batch = chosen; state.ui.batchAuditOpen = false; saveState(); render(); }
   }
   if (event.target.id === 'category-filter') { state.ui.productCategory = event.target.value; render(); saveState(); }
   if (event.target.id === 'asset-filter') { state.ui.assetFilter = event.target.value; render(); }
@@ -1786,6 +1796,12 @@ document.addEventListener('change', (event) => {
     reader.readAsDataURL(file);
   }
 });
+
+document.addEventListener('toggle', (event) => {
+  if (event.target.id !== 'batch-audit-details') return;
+  state.ui.batchAuditOpen = event.target.open;
+  saveState();
+}, true);
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') { if (imagePreview) closeImagePreview(); else if (!$('#import-modal').hidden) closeImport(); else if ($('#overlay-root').innerHTML) closeOverlay(); }

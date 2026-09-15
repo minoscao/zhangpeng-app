@@ -79,10 +79,10 @@
 @media (max-width: 760px) { .final-prompt-review textarea, .final-prompt-review select, .region-reference textarea { font-size: 16px; } }
 .public-prompt-area label, .city-planner label { color: var(--ink-800); font-weight: 700; }
 .public-prompt-area textarea, .city-planner textarea { width: 100%; min-height: 110px; padding: 12px; color: var(--ink-950); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); resize: vertical; }
-.public-prompt-area .select-control, .city-planner .input-control, .batch-tools .select-control { width: 100%; max-width: 100%; min-height: 44px; }
+.public-prompt-area .select-control, .city-planner .input-control { width: 100%; max-width: 100%; min-height: 44px; }
 .public-prompt-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .public-prompt-actions input { flex: 1 1 180px; min-width: 0; }
-.public-prompt-actions span, .city-planner p, .batch-tools p { margin: 0; color: var(--ink-600); font-size: 13px; overflow-wrap: anywhere; }
+.public-prompt-actions span, .city-planner p { margin: 0; color: var(--ink-600); font-size: 13px; overflow-wrap: anywhere; }
 .public-prompt-actions .button { min-height: 44px; }
 .prompt-preview summary, .city-planner summary, .batch-tools summary { cursor: pointer; padding-block: 12px; color: var(--purple-800); font-weight: 700; }
 .prompt-preview pre, .result-audit pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; color: var(--ink-800); max-height: 320px; overflow: auto; }
@@ -104,7 +104,14 @@
 .location-editor .option-toggle { min-width: 0; }
 .location-editor .option-copy { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .location-editor input, .location-rule textarea { font-size: 16px; } }
-.batch-tools { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
+.batch-tools { padding: 0 18px 10px; border-bottom: 1px solid var(--line); }
+.batch-tools > details > summary { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; list-style-position: inside; }
+.batch-tools > details > summary span { color: var(--ink-800); font-size: 12px; font-weight: 800; }
+.batch-tools > details > summary small { color: var(--ink-500); font-size: 9px; font-weight: 600; }
+.batch-audit-list { max-height: 46vh; overflow: auto; border-top: 1px solid var(--line); }
+.result-summary-strip { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 13px; padding-bottom: 11px; color: var(--ink-500); border-bottom: 1px solid var(--line); font-size: 10px; font-variant-numeric: tabular-nums; }
+.result-summary-strip span { white-space: nowrap; }
+.result-summary-strip strong { color: var(--ink-900); font-size: 12px; }
 .page--batch .result-grid { grid-template-columns: minmax(0, 1fr); }
 .page--batch .result-card img { width: 100%; }
 .result-model { padding: 8px; background: var(--surface); color: var(--ink-800); font-size: 13px; overflow-wrap: anywhere; }
@@ -447,6 +454,9 @@ body.overlay-open { overflow: hidden; }
 .batch-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 20px; }
 .batch-title h2 { margin: 0; font-size: 24px; letter-spacing: -.025em; }
 .batch-title p { margin: 4px 0 0; color: var(--ink-600); font-size: 12px; }
+.batch-title-actions { display: flex; max-width: 310px; align-items: flex-end; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.batch-history-control { display: grid; min-width: 220px; gap: 4px; color: var(--ink-600); font-size: 10px; font-weight: 700; }
+.batch-history-control .select-control { width: 100%; min-height: 44px; font-size: 11px; }
 .draft-badge { display: inline-flex; min-height: 28px; align-items: center; padding: 0 10px; color: var(--green); background: var(--green-bg); border-radius: 99px; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .studio-settings-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 0 20px; }
 .studio-settings-row > div { display: grid; min-width: 0; gap: 6px; }
@@ -746,6 +756,8 @@ body.overlay-open { overflow: hidden; }
   .library-summary p { width: 100%; margin-left: 0; }
   .batch-main { padding: 15px; }
   .batch-title, .formula-bar { align-items: stretch; flex-direction: column; }
+  .batch-title-actions { max-width: none; align-items: stretch; justify-content: flex-start; }
+  .batch-history-control { width: 100%; min-width: 0; }
   .selected-products, .picker-grid, .generation-mode-grid { grid-template-columns: 1fr; }
   .prompt-group-row { grid-template-columns: 1fr; }
   .prompt-row-actions { grid-column: auto; justify-content: flex-start; flex-wrap: wrap; }
@@ -757,6 +769,7 @@ body.overlay-open { overflow: hidden; }
   .drawer-asset-grid, .asset-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .export-form, .export-summary { grid-template-columns: 1fr; }
   .quality-rubric { grid-template-columns: 1fr; }
+  .result-summary-strip { display: grid; grid-template-columns: repeat(2, 1fr); }
   .result-actions .result-4k-button { width: auto; min-width: 92px; grid-column: 1 / -1; }
 }
 

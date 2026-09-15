@@ -90,7 +90,7 @@ for (const prompt of ['生成真实帐篷产品场景', 'a'.repeat(2001)]) {
 }
 assert.ok(wanRequest);
 
-const regionalPrompt = '【地域场景硬约束｜不可省略】必须彻底移除参考图白底，并清楚显示悉尼歌剧院。';
+const regionalPrompt = '【地域场景硬约束｜不可省略】必须彻底移除参考图白底，并清楚显示悉尼歌剧院。\n【人物数量硬约束｜0人】画面完全无人，人物数量必须严格等于 0。';
 const qwenQualityResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
@@ -106,8 +106,19 @@ assert.equal(qualityRequest.parameters.size, '2048*1536');
 assert.match(qualityRequest.parameters.negative_prompt, /参考图白底/);
 assert.match(qualityRequest.parameters.negative_prompt, /错误城市/);
 assert.match(qualityRequest.parameters.negative_prompt, /模糊人脸/);
+assert.match(qualityRequest.parameters.negative_prompt, /路人/);
+assert.match(qualityRequest.parameters.negative_prompt, /人物剪影/);
+assert.match(qualityRequest.parameters.negative_prompt, /人物倒影/);
 assert.match(qualityRequest.parameters.negative_prompt, /多个消失点/);
 assert.match(qualityRequest.parameters.negative_prompt, /阴影方向冲突/);
 assert.match(cityRequest.messages[0].content, /只选择一个最有把握/);
+
+await worker.fetch(new Request('https://app.example/api/qwen/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
+  body: JSON.stringify({ prompt: '【人物数量硬约束｜1人】画面只允许一名儿童。', referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
+}), env);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /第二个人/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /额外人物/);
 
 console.log('Worker OpenAI integration tests passed.');

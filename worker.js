@@ -197,6 +197,8 @@ async function createQwenTask(request, env, apiKey) {
   const content = [...referenceImages.map((image) => ({ image })), { text: prompt }];
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
+  const noPeopleRequired = prompt.includes('【人物数量硬约束｜0人】');
+  const onePersonRequired = prompt.includes('【人物数量硬约束｜1人】');
   const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
   if (body.generationMode === 'wan' && !referenceImages.length) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '万相产品编辑需要至少一张参考产品图。' } }, 400);
@@ -204,6 +206,8 @@ async function createQwenTask(request, env, apiKey) {
     negative_prompt: [
       '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
       '模糊人脸，五官融化，左右眼不对称，蜡像皮肤，重复人物，多余手指，多余肢体，断肢，穿模，错误遮挡，人物比例错误',
+      noPeopleRequired ? '人物，儿童，成人，路人，人群，远景人影，人物剪影，人体局部，手，脚，脸，人物倒影，照片人物，屏幕人像' : '',
+      onePersonRequired ? '第二个人，额外人物，多人，人群，路人，远景人影，人物剪影，额外手脚，人物倒影，照片人物，屏幕人像' : '',
       '拼贴感，舞台布景，假景片，多个消失点，地平线错位，建筑倾斜，地标比例过大，帐篷悬浮，物体穿插，阴影方向冲突，杂乱道具，过度背景虚化',
       locationRequired ? '参考图白底，透明背景，摄影棚背景，纯色背景，普通无名草坪，通用住宅，错误城市，缺失地标，地标无法辨认，背景过度虚化' : '',
     ].filter(Boolean).join('，'),

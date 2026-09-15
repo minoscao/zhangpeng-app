@@ -2,14 +2,14 @@
   'use strict';
 
   const VARIANT_DIRECTIONS = [
-    '主视角版本：保持构图稳定，人物动作和场景陈设简洁自然。',
-    '侧向变化版本：在不改变产品结构、配色、景别和指定地标的前提下，改变摄影机水平位置、人物动作或道具布局，必须与主视角明显不同。',
+    '主视角版本：保持构图稳定，场景陈设简洁自然；不得因为生成变体而新增人物。',
+    '侧向变化版本：在不改变产品结构、配色、景别和指定地标的前提下，改变摄影机水平位置或道具布局，必须与主视角明显不同；不得新增人物。',
     '光线变化版本：保持全部硬性需求，改变自然光方向和前后景组织，不得只做轻微色调变化。',
-    '生活动作版本：保持产品与地域线索，使用另一种可信的儿童互动动作和环境细节布局。',
+    '环境细节版本：保持产品与地域线索，只改变少量环境细节与留白；不得新增人物。',
     '编辑构图版本：保持所选景别的产品占比，改变留白方向和视觉动线，输出可辨别的新方案。',
     '环境层次版本：保持产品完整，改变前景与远景元素的空间关系，不得复制上一版构图。',
     '机位高度版本：保持所选景别与焦段区间，适度改变相机高度和观察角度，产品结构仍需准确。',
-    '陈设变化版本：只变化非产品道具与人物站位，不改变帐篷、地标、配色或画幅。',
+    '陈设变化版本：只变化非产品道具的位置，不改变帐篷、地标、配色、画幅或人物数量。',
     '备选导演版本：在全部硬性条件内给出明显不同但同等可交付的摄影方案。',
   ];
 
@@ -109,23 +109,28 @@
 
   function sceneRealismDirective(templatePrompt, otherRequirements, shotRule, product) {
     if (/纯白背景/.test(templatePrompt)) {
-      return '【空间质检】白底产品图只保留一个真实地面接触面和自然接触阴影；帐篷不得悬浮、倾斜或改变结构，不出现人物与场景道具。';
+      return '【空间质检】白底产品图只保留一个真实地面接触面和自然接触阴影；帐篷不得悬浮、倾斜或改变结构。\n【人物数量硬约束｜0人】画面必须完全无人，不出现儿童、成人、人体局部、人物倒影、照片或屏幕人像；人物数量必须严格等于 0。\n不得出现任何场景道具。';
     }
-    const peopleContext = [templatePrompt, otherRequirements].filter(Boolean).join('；');
-    const peopleRequested = /儿童在|孩子|亲子生活|一名儿童|人物必须|出现人物/.test(peopleContext) && !/不出现人物|不要自行添加人物/.test(peopleContext);
+    const userPeopleRequest = String(otherRequirements || '');
+    const userForbidsPeople = /不出现(?:任何)?人物|不要(?:添加|出现)?人物|不得出现人物|禁止出现人物|画面无人|无人场景|(?:0|零)\s*人/.test(userPeopleRequest);
+    const userRequestsPeople = /(?:一名|一个|1\s*名|1\s*个).{0,8}(?:儿童|孩子|人物|成人)|(?:儿童|孩子|人物|成人).{0,12}(?:阅读|玩耍|互动|坐|站|整理|进入|陪伴)/.test(userPeopleRequest);
+    const templateRequestsOnePerson = /只安排一名|只出现一名|最多一名儿童|亲子生活摄影/.test(templatePrompt);
+    const peopleRequested = !userForbidsPeople && (userRequestsPeople || templateRequestsOnePerson);
     const audience = product?.specs?.audience ? `人物年龄与产品受众“${product.specs.audience}”一致` : '人物年龄与产品用途一致';
     const personRule = !peopleRequested
-      ? '人物：以上未明确要求人物时，画面不得自行添加人物。'
+      ? '【人物数量硬约束｜0人】画面必须完全无人。不得出现儿童、成人、远景人影、路人、局部手脚、镜面或水面倒影中的人物，也不得在海报、照片或屏幕中出现人脸与人形；模型不得为了增加生活感自行添加人物。人物数量不是建议，而是验收条件：必须严格等于 0。'
       : /环境远景|建立镜头/.test(shotRule)
-        ? `人物：最多一名儿童，${audience}，全身位于帐篷同一地面，采用简单自然的侧身或三分之四侧身动作；远景不安排脸部特写，但可见五官不得糊成色块，不奔跑、不挥手。`
-        : `人物：只出现一名儿童，${audience}，采用简单静止动作和三分之四侧脸；脸部与帐篷入口处于同一清晰焦平面，双眼、鼻子、嘴和脸部轮廓完整自然，无运动模糊。双手不抓复杂支架，四肢不被帐篷边缘切断。`;
-    const scale = product?.specs?.size ? `帐篷按标称尺寸“${product.specs.size}”与人物、家具和建筑保持可信比例。` : '帐篷与人物、家具和建筑保持可信比例。';
+        ? `【人物数量硬约束｜1人】画面只允许一名儿童，人物数量必须严格等于 1，不得出现第二个人、路人、远景人影、局部手脚或人物倒影。${audience}，全身位于帐篷同一地面，采用简单自然的侧身或三分之四侧身动作；远景不安排脸部特写，但可见五官不得糊成色块，不奔跑、不挥手。`
+        : `【人物数量硬约束｜1人】画面只允许一名儿童，人物数量必须严格等于 1，不得出现第二个人、路人、远景人影、局部手脚或人物倒影。${audience}，采用简单静止动作和三分之四侧脸；脸部与帐篷入口处于同一清晰焦平面，双眼、鼻子、嘴和脸部轮廓完整自然，无运动模糊。双手不抓复杂支架，四肢不被帐篷边缘切断。`;
+    const scale = product?.specs?.size
+      ? `帐篷按标称尺寸“${product.specs.size}”与${peopleRequested ? '唯一人物、' : ''}家具和建筑保持可信比例。`
+      : `帐篷与${peopleRequested ? '唯一人物、' : ''}家具和建筑保持可信比例。`;
     return [
       '【真实空间与人物质检｜不可省略】整张图必须来自同一台相机、同一地面和同一个透视系统，不得使用拼贴、舞台布景或多个不一致视点。',
       `布局：先建立连续地面、水平线和单一消失点，再放置帐篷；${scale}帐篷支脚全部落地，接触阴影完整，不穿插地面、人物、家具或植物。主地标只在中远景出现。`,
-      '光影：全场只有一个主光方向；帐篷、人物、树木与建筑的受光面和投影方向一致，天空、空气透视和白平衡统一。除帐篷外最多保留两类简单道具，删除拥挤装饰。',
+      `光影：全场只有一个主光方向；帐篷、${peopleRequested ? '唯一人物、' : ''}树木与建筑的受光面和投影方向一致，天空、空气透视和白平衡统一。除帐篷外最多保留两类简单道具，删除拥挤装饰。`,
       personRule,
-      '成片：真实全画幅商业摄影，结构边缘、帐篷织物和需要出现的人脸清晰；景深自然但不能用虚化掩盖错误，禁止广角拉伸、悬浮、比例错乱、重复肢体、蜡像皮肤和塑料质感。',
+      `成片：真实全画幅商业摄影，结构边缘和帐篷织物清晰${peopleRequested ? '，唯一人物的脸部清晰自然' : ''}；景深自然但不能用虚化掩盖错误，禁止广角拉伸、悬浮、比例错乱、重复肢体、蜡像皮肤和塑料质感。`,
     ].join('\n');
   }
 
@@ -207,14 +212,14 @@
   }
 
   function emptyEvaluation() {
-    return { structure: 0, location: 'pending', shot: 'pending', defects: 'pending', deliverable: 'pending' };
+    return { structure: 0, location: 'pending', shot: 'pending', people: 'pending', defects: 'pending', deliverable: 'pending' };
   }
 
   function deriveReview(evaluation) {
     const value = { ...emptyEvaluation(), ...(evaluation || {}) };
     if (value.structure > 0 && value.structure < 4) return 'fail';
-    if ([value.location, value.shot, value.defects, value.deliverable].includes('fail')) return 'fail';
-    if (value.structure >= 4 && [value.location, value.shot, value.defects, value.deliverable].every((item) => item === 'pass' || item === 'na')) return 'pass';
+    if ([value.location, value.shot, value.people, value.defects, value.deliverable].includes('fail')) return 'fail';
+    if (value.structure >= 4 && [value.location, value.shot, value.people, value.defects, value.deliverable].every((item) => item === 'pass' || item === 'na')) return 'pass';
     return 'pending';
   }
 
