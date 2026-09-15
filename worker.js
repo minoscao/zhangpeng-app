@@ -23,6 +23,13 @@ const SIZE_BY_RATIO = Object.freeze({
   '9:16': '720*1280',
   '16:9': '1280*720',
 });
+const QWEN_QUALITY_SIZE_BY_RATIO = Object.freeze({
+  '1:1': '2048*2048',
+  '3:4': '1536*2048',
+  '4:3': '2048*1536',
+  '9:16': '1152*2048',
+  '16:9': '2048*1152',
+});
 const OPENAI_SIZE_BY_RATIO = Object.freeze({
   '1:1': '1024x1024',
   '3:4': '1152x1536',
@@ -190,14 +197,17 @@ async function createQwenTask(request, env, apiKey) {
   const content = [...referenceImages.map((image) => ({ image })), { text: prompt }];
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
+  const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
   if (body.generationMode === 'wan' && !referenceImages.length) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '万相产品编辑需要至少一张参考产品图。' } }, 400);
   const parameters = {
     negative_prompt: [
       '文字，水印，商标，变形帐篷，错误支架，多余结构，低清晰度，模糊，过度磨皮，廉价塑料感',
+      '模糊人脸，五官融化，左右眼不对称，蜡像皮肤，重复人物，多余手指，多余肢体，断肢，穿模，错误遮挡，人物比例错误',
+      '拼贴感，舞台布景，假景片，多个消失点，地平线错位，建筑倾斜，地标比例过大，帐篷悬浮，物体穿插，阴影方向冲突，杂乱道具，过度背景虚化',
       locationRequired ? '参考图白底，透明背景，摄影棚背景，纯色背景，普通无名草坪，通用住宅，错误城市，缺失地标，地标无法辨认，背景过度虚化' : '',
     ].filter(Boolean).join('，'),
-    size: SIZE_BY_RATIO[body.ratio] || SIZE_BY_RATIO['4:3'],
+    size: qualitySize[body.ratio] || qualitySize['4:3'],
     n: 1,
     prompt_extend: profile.promptExtend,
     watermark: false,

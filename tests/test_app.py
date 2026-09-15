@@ -140,8 +140,8 @@ class DesignFlowTests(unittest.TestCase):
     def test_prompt_rules_are_product_specific_and_photo_real(self):
         client = (ROOT / "app/app-v2.js").read_text(encoding="utf-8") + (ROOT / "app/core.js").read_text(encoding="utf-8")
         self.assertIn("name: '当地背景'", client)
-        self.assertIn("悉尼歌剧院 Sydney Opera House", client)
-        self.assertIn("海港大桥 Sydney Harbour Bridge", client)
+        self.assertIn("只把悉尼歌剧院 Sydney Opera House", client)
+        self.assertIn("不要同时强塞海港大桥", client)
         self.assertIn("name: '产品配色'", client)
         self.assertIn("只改变产品织物颜色", client)
         self.assertIn("promptDetails", client)

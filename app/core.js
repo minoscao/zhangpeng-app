@@ -95,15 +95,37 @@
   function locationDirective(locationRule, shotRule) {
     if (!locationRule) return '';
     const visibility = /环境远景|建立镜头/.test(shotRule)
-      ? '环境占画面 75%–88%，城市地标或地域建筑占画面 25%–45%，轮廓与关键特征清晰可辨。'
+      ? '环境占画面 75%–88%，只保留一个主地域锚点，占画面约 12%–25%，轮廓与关键特征清晰可辨。'
       : /产品近景|近景特写/.test(shotRule)
-        ? '即使是近景，至少保留一个占画面 15% 以上、特征可辨的地域锚点；不得把它虚化成无法识别的色块。'
-        : '背景环境占画面 40%–55%，至少一个城市地标或地域建筑占画面 20%–35%，名称对应的关键特征清晰可辨。';
+        ? '近景只在画面边缘或远景保留一个占画面约 5%–10% 的地域锚点；保持特征可辨，但不把地标放大贴到产品后方。'
+        : '背景环境占画面 40%–55%，只保留一个主地域锚点，占画面约 8%–18%，名称对应的关键特征清晰可辨。';
     return [
       '【地域场景硬约束｜不可省略】输入参考图只用于锁定帐篷产品，不代表成片背景；必须彻底移除参考图原有的白底、透明底、摄影棚或旧场景，并重新生成所选地区的真实环境。',
       `目标地域：${locationRule}。`,
       `可见性验收：${visibility}`,
-      '不得用普通草坪、无名住宅、纯色背景、摄影棚或无法辨认的背景虚化代替目标地域；不得出现其他城市的地标。若所选使用场景与户外地域冲突，将“儿童房、阅读角”等理解为面向该地标的开放露台或庭院活动区；先删除非必要道具，也不能删除地域锚点。',
+      '主地标必须处于中远景并服从真实透视，不得像贴纸、布景板或巨型模型贴在帐篷后方。不得用普通草坪、无名住宅、纯色背景、摄影棚或无法辨认的背景虚化代替目标地域；不得出现其他城市的地标。若所选使用场景与户外地域冲突，将“儿童房、阅读角”等理解为面向该地标的开放露台或庭院活动区。',
+    ].join('\n');
+  }
+
+  function sceneRealismDirective(templatePrompt, otherRequirements, shotRule, product) {
+    if (/纯白背景/.test(templatePrompt)) {
+      return '【空间质检】白底产品图只保留一个真实地面接触面和自然接触阴影；帐篷不得悬浮、倾斜或改变结构，不出现人物与场景道具。';
+    }
+    const peopleContext = [templatePrompt, otherRequirements].filter(Boolean).join('；');
+    const peopleRequested = /儿童在|孩子|亲子生活|一名儿童|人物必须|出现人物/.test(peopleContext) && !/不出现人物|不要自行添加人物/.test(peopleContext);
+    const audience = product?.specs?.audience ? `人物年龄与产品受众“${product.specs.audience}”一致` : '人物年龄与产品用途一致';
+    const personRule = !peopleRequested
+      ? '人物：以上未明确要求人物时，画面不得自行添加人物。'
+      : /环境远景|建立镜头/.test(shotRule)
+        ? `人物：最多一名儿童，${audience}，全身位于帐篷同一地面，采用简单自然的侧身或三分之四侧身动作；远景不安排脸部特写，但可见五官不得糊成色块，不奔跑、不挥手。`
+        : `人物：只出现一名儿童，${audience}，采用简单静止动作和三分之四侧脸；脸部与帐篷入口处于同一清晰焦平面，双眼、鼻子、嘴和脸部轮廓完整自然，无运动模糊。双手不抓复杂支架，四肢不被帐篷边缘切断。`;
+    const scale = product?.specs?.size ? `帐篷按标称尺寸“${product.specs.size}”与人物、家具和建筑保持可信比例。` : '帐篷与人物、家具和建筑保持可信比例。';
+    return [
+      '【真实空间与人物质检｜不可省略】整张图必须来自同一台相机、同一地面和同一个透视系统，不得使用拼贴、舞台布景或多个不一致视点。',
+      `布局：先建立连续地面、水平线和单一消失点，再放置帐篷；${scale}帐篷支脚全部落地，接触阴影完整，不穿插地面、人物、家具或植物。主地标只在中远景出现。`,
+      '光影：全场只有一个主光方向；帐篷、人物、树木与建筑的受光面和投影方向一致，天空、空气透视和白平衡统一。除帐篷外最多保留两类简单道具，删除拥挤装饰。',
+      personRule,
+      '成片：真实全画幅商业摄影，结构边缘、帐篷织物和需要出现的人脸清晰；景深自然但不能用虚化掩盖错误，禁止广角拉伸、悬浮、比例错乱、重复肢体、蜡像皮肤和塑料质感。',
     ].join('\n');
   }
 
@@ -127,6 +149,7 @@
       locationDirective(locationRule, shotRule),
       shotRule ? `镜头景别硬性约束（不得自动折中成中景）：${shotRule}。若占比不符即视为生成失败。` : '',
       `场景任务：${template?.prompt || ''}`,
+      sceneRealismDirective(template?.prompt || '', state.studio.otherRequirements?.trim(), shotRule, product),
       locationRule
         ? '冲突优先级：帐篷结构与地域场景硬约束 > 镜头景别与画布构图 > 产品配色和其他明确要求 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。'
         : '优先级：帐篷结构与明确要求 > 镜头景别与画布构图 > 场景模板 > 摄影美感。所有“必须”元素都要可辨识。',
@@ -134,8 +157,7 @@
       `画幅比例：${ratio}。画布方向与构图必须遵循所选尺寸。`,
       state.studio.otherRequirements?.trim() ? `其他要求：\n${state.studio.otherRequirements.trim()}` : '',
       state.studio.universalPrompt,
-      '摄影与产品质感：真实全画幅商业摄影，光线自然有方向，曝光和白平衡准确；织物纤维、包边、缝线、褶皱张力、支架材质和接触阴影清晰可信。避免夸张 HDR、浓重滤镜、塑料感、结构变形和悬浮感。',
-      '适合国际儿童用品品牌、电商主视觉与高端产品手册；人物动作自然、比例正确且不得遮挡帐篷关键结构。',
+      '交付标准：适合国际儿童用品品牌、电商主视觉与高端产品手册；织物纤维、包边、缝线、褶皱张力和支架材质清晰可信，不添加文字、商标或水印。',
     ].filter(Boolean).join('\n');
   }
 
@@ -165,7 +187,9 @@
       id: source.id,
       name: source.name,
       enabled: true,
-      options: source.options.map((label, index) => ({ id: `${source.id}-${index}`, label, prompt: label, selected: index === 0, quantity: 1 })),
+      options: source.options.map((option, index) => typeof option === 'string'
+        ? { id: `${source.id}-${index}`, label: option, prompt: option, selected: index === 0, quantity: 1 }
+        : { ...structuredClone(option) }),
     });
   }
 
@@ -204,6 +228,7 @@
     plannedTotal,
     formulaText,
     locationDirective,
+    sceneRealismDirective,
     compilePrompt,
     reviewFingerprint,
     applyTemplate,

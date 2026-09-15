@@ -44,12 +44,12 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 const PUBLIC_PROMPT_TEMPLATES = [
-  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。' },
+  { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。没有明确要求人物时不要自行添加人物，避免无意义地增加画面复杂度。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
   { id: 'cabin', name: '木屋自然庭院', prompt: '帐篷位于开阔自然庭院，后方必须有清楚可辨的真实小木屋、木质立面和自然植被。采用所选地区的住宅与景观风格，不要求城市地标；地域规则中的天际线是备选，不得替代本模板指定的小木屋。' },
-  { id: 'family', name: '亲子生活摄影', prompt: '儿童在帐篷旁自然玩耍，帐篷关键开口与支架完整可见。必须落实所选城市背景与产品面料配色，人物不抢产品主体，生活动作真实而非摆拍。' },
+  { id: 'family', name: '亲子生活摄影', prompt: '只安排一名与产品适用年龄一致的儿童在帐篷入口旁进行简单、静止、自然的阅读或整理靠垫动作；人物和帐篷位于同一地面与清晰焦平面，三分之四侧脸的眼睛、鼻子、嘴和脸部轮廓清楚自然。帐篷关键开口与支架完整可见，必须落实所选城市背景与产品面料配色。禁止多人拥挤、奔跑、挥手、遮脸或双手抓握复杂支架。' },
   { id: 'white', name: '白底电商精修', backgroundMode: 'none', prompt: '输出纯白背景真实产品摄影，帐篷完整居中且比例准确、面料纹理与接触阴影清晰。不出现人物、建筑、城市景观或道具；此模板不使用当地背景规则，只落实产品配色和产品细节。' },
 ];
 const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
@@ -116,7 +116,7 @@ const CORE_PROMPT_GROUPS = Object.freeze({
     id: 'group-location', name: '当地背景', enabled: true,
     options: Object.freeze([
       Object.freeze({ id: 'melbourne', label: '澳大利亚·墨尔本', description: '雅拉河水岸、弗林德斯街车站与 CBD', prompt: '地点锁定为澳大利亚墨尔本 Melbourne。必须采用雅拉河 Yarra River 水岸公园视角，并让弗林德斯街车站 Flinders Street Station 黄赭色立面、绿色穹顶和墨尔本 CBD 天际线中的至少一个成为清楚可辨的地域锚点；禁止改成悉尼地标、普通草坪或无名住宅。建筑透视、尺度、日光方向与帐篷所在岸边空间必须真实一致', selected: false, quantity: 1 }),
-      Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '歌剧院、海港大桥与海滨公园', prompt: '地点锁定为澳大利亚悉尼 Sydney。必须采用悉尼海港沿岸开阔公园视角，清楚呈现悉尼歌剧院 Sydney Opera House 的白色帆形屋顶，并同时保留海港大桥 Sydney Harbour Bridge 的钢拱轮廓作为第二识别线索；二者需处于可信的海港空间关系中。禁止用普通现代住宅、无名草坪或其他城市天际线代替', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'sydney', label: '澳大利亚·悉尼', description: '歌剧院、海港水岸与明亮自然光', prompt: '地点锁定为澳大利亚悉尼 Sydney。采用悉尼海港沿岸开阔公园视角，只把悉尼歌剧院 Sydney Opera House 的白色帆形屋顶作为主地域锚点，放在中远景并保持真实尺度；海港水面、滨水步道与清透明亮的日光负责补充悉尼气候和空间感。不要同时强塞海港大桥，禁止用普通现代住宅、无名草坪或其他城市天际线代替', selected: true, quantity: 1 }),
       Object.freeze({ id: 'dubai', label: '阿联酋·迪拜', description: '哈利法塔、浅色石材与棕榈庭院', prompt: '地点锁定为阿联酋迪拜 Dubai。必须在浅色石材与棕榈组成的开放式家庭庭院或公园中，清楚呈现哈利法塔 Burj Khalifa 独特的逐级收分尖塔轮廓作为地域锚点；使用干燥通透的暖日光和可信城市尺度。禁止只给沙漠、普通豪宅或泛化现代天际线，禁止混入其他海湾城市地标', selected: true, quantity: 2 }),
       Object.freeze({ id: 'suzhou', label: '中国·苏州', description: '金鸡湖、东方之门与现代江南', prompt: '地点锁定为中国苏州 Suzhou。必须采用金鸡湖 Jinji Lake 岸边开放绿地视角，清楚呈现东方之门 Gate of the Orient 的拱门形轮廓作为现代苏州地域锚点，并以少量白墙黛瓦或江南园林植被补充层次。禁止只用泛化中式庭院、古镇布景或其他城市天际线代替', selected: false, quantity: 1 }),
       Object.freeze({ id: 'california', label: '美国·加利福尼亚', description: '加州工匠屋、耐旱植物与海岸阳光', prompt: '地点锁定为美国加利福尼亚 California。必须呈现可辨认的加州家庭住宅语言：低坡屋顶的 Craftsman 工匠屋、灰泥或木板立面、龙舌兰等耐旱植物，并保留棕榈与干燥山丘或海岸光线中的至少一项；采用明亮干燥的午后日光。禁止改成普通欧式草坪、英式花园或无地域样板房', selected: false, quantity: 1 }),
@@ -148,9 +148,19 @@ const CORE_PROMPT_GROUPS = Object.freeze({
   'group-shot': Object.freeze({
     id: 'group-shot', name: '镜头景别', enabled: true,
     options: Object.freeze([
-      Object.freeze({ id: 'shot-close', label: '近景', description: '帐篷占 80%–95% · 产品细节主导', prompt: '景别必须是明显的产品近景特写，摄影机距离约 1–2 米，使用 65–85mm 等效焦段的紧凑透视。帐篷主体占画面面积 80%–95%，入口、面料纹理、包边、缝线和支架连接清晰可见；帐篷轮廓贴近画面边缘，允许极少量外轮廓自然越界，但不得裁掉入口和关键结构。环境只占 5%–20%，仅作为虚化或局部可辨的地点线索。严禁拉远成完整环境展示，严禁帐篷占比低于 75%，不要中景或广角全景', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'shot-close', label: '近景', description: '帐篷占 80%–95% · 产品细节主导', prompt: '景别必须是明显的产品近景特写，摄影机距离约 1–2 米，使用 65–85mm 等效焦段的紧凑透视。帐篷主体占画面面积 80%–95%，入口、面料纹理、包边、缝线和支架连接清晰可见；帐篷轮廓贴近画面边缘，允许极少量外轮廓自然越界，但不得裁掉入口和关键结构。环境只占 5%–20%，主地域锚点在画面边缘或远景保留可辨轮廓，其余背景采用自然景深。严禁拉远成完整环境展示，严禁帐篷占比低于 75%，不要中景或广角全景', selected: false, quantity: 1 }),
       Object.freeze({ id: 'shot-medium', label: '中景', description: '帐篷占 45%–60% · 产品环境平衡', prompt: '景别必须是标准产品中景，摄影机距离约 3–5 米，使用 45–55mm 等效标准焦段和平视透视。帐篷完整呈现，占画面面积 45%–60%，四周保留约半个帐篷宽度的环境空间；产品结构和使用场景同等清楚，人物如出现应与帐篷形成真实互动。严禁贴边特写，也严禁帐篷缩小到画面 35% 以下；不要近景裁切或远景全景', selected: true, quantity: 1 }),
       Object.freeze({ id: 'shot-wide', label: '远景', description: '帐篷占 12%–25% · 地域环境主导', prompt: '景别必须是明显的环境远景或建立镜头，摄影机距离约 10–20 米，使用 24–35mm 等效广角焦段。帐篷完整置于画面下三分之一附近，占画面面积 12%–25%；环境占 75%–88%，必须清楚展示大面积前景、完整场地、天空或建筑天际线，让地域地标和空间尺度成为主要视觉信息，同时帐篷仍可辨认。帐篷四周至少保留一至两个帐篷宽度的环境空间。严禁把帐篷放大到 30% 以上，严禁返回近景或常规中景', selected: false, quantity: 1 }),
+    ]),
+  }),
+  'group-scene': Object.freeze({
+    id: 'group-scene', name: '使用场景', enabled: true,
+    options: Object.freeze([
+      Object.freeze({ id: 'scene-nursery', label: '儿童房', description: '真实住宅尺度 · 窗边活动区', prompt: '真实高端住宅儿童房的窗边活动区，帐篷完整落在平整地毯上；墙面、窗框和家具遵循同一透视，家具尺寸与帐篷相符。只保留地毯、矮书架两类简单陈设，不堆玩具，不做样板间或影棚布景', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'scene-reading', label: '阅读角', description: '安静自然 · 简洁坐垫与书本', prompt: '帐篷入口形成真实阅读角，只放一只坐垫和一本打开的书；物件完整落地且不穿插帐篷，空间留白充足。若要求人物，只安排一名儿童静坐阅读，避免复杂手势、遮脸和多人互动', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'scene-backyard', label: '后院草地', description: '开阔真实 · 连续地面与自然植被', prompt: '真实家庭后院或开放庭院，连续平整草地从前景延伸至建筑，帐篷支脚稳定落地；仅保留一棵树和一组低矮灌木作为空间层次，不出现杂乱派对道具、假草皮、巨型植物或不合理围墙', selected: true, quantity: 1 }),
+      Object.freeze({ id: 'scene-open-field', label: '开阔自然地', description: '梦幻空旷 · 真实户外尺度', prompt: '开阔、安静且真实的自然草甸或缓坡，视野通透，地形连续，天空和远景具有自然空气透视；帐篷落在可承重的平整草地上，只保留少量野花和远处树线，不出现奇幻漂浮物、舞台布景或不合比例的山体', selected: false, quantity: 1 }),
+      Object.freeze({ id: 'scene-campsite', label: '露营营地', description: '规范营位 · 克制户外陈设', prompt: '真实合规的家庭露营营位，帐篷位于平整营位中央，地钉、风绳和通道位置合理；只保留折叠椅与小型露营灯两类道具，不出现明火、车辆穿插、密集装备或多个帐篷抢主体', selected: false, quantity: 1 }),
     ]),
   }),
 });
@@ -166,7 +176,7 @@ const PROVIDERS = Object.freeze({
     name: '阿里千问', shortName: '千问', keyStorage: QWEN_KEY_STORAGE, keyLabel: '千问 API Key', avatar: 'Q',
     profiles: Object.freeze({
       fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 5 }),
-      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '关闭二次改写，优先精确执行地域与产品约束', submitLimit: 5, concurrency: 5 }),
+      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '2048 长边精细输出，强化场景空间与人物清晰度', submitLimit: 5, concurrency: 5 }),
       wan: Object.freeze({ name: '万相 · 产品一致性', model: 'Wan 2.6 Image', code: 'wan2.6-image', detail: '参考图编辑 · 关闭扩写，保留明确需求', submitLimit: 5, concurrency: 2 }),
     }),
   }),
@@ -222,7 +232,7 @@ const seedState = {
     structuredClone(CORE_PROMPT_GROUPS['group-shot']),
   ],
   promptLibrary: [
-    { id: 'group-scene', name: '使用场景', options: ['儿童房', '阅读角', '后院草地', '露营营地'] },
+    { id: 'group-scene', name: '使用场景', options: structuredClone(CORE_PROMPT_GROUPS['group-scene'].options) },
     { id: 'group-purpose', name: '页面用途', options: ['产品主图', '亲子生活图', '电商详情图'] },
     { id: 'group-style', name: '视觉风格', options: VISUAL_STYLE_OPTIONS.map((option) => option.label) },
     { id: 'group-canvas', name: '画布尺寸', options: CORE_PROMPT_GROUPS['group-canvas'].options.map((option) => option.label) },
@@ -295,17 +305,27 @@ function upgradeCorePromptGroups(groups) {
     if (!template) return group;
     const existingOptions = Array.isArray(group.options) ? group.options : [];
     const templateIds = new Set(template.options.map((option) => option.id));
+    const templateLabels = new Set(template.options.map((option) => option.label));
     const upgradedOptions = template.options.map((option) => {
-      const existing = existingOptions.find((item) => item.id === option.id);
+      const existing = existingOptions.find((item) => item.id === option.id || item.label === option.label);
       return { ...structuredClone(option), selected: existing?.selected ?? option.selected, quantity: Math.max(1, Number(existing?.quantity) || option.quantity) };
     });
-    const customOptions = existingOptions.filter((option) => !templateIds.has(option.id)).map((option) => ({ ...option, prompt: option.prompt || option.label, description: option.description || '自定义选项' }));
+    const customOptions = existingOptions.filter((option) => !templateIds.has(option.id) && !templateLabels.has(option.label)).map((option) => ({ ...option, prompt: option.prompt || option.label, description: option.description || '自定义选项' }));
     return { ...structuredClone(template), enabled: group.enabled !== false, options: [...upgradedOptions, ...customOptions] };
   });
   for (const id of ['group-canvas', 'group-shot']) {
     if (!upgradedGroups.some((group) => group.id === id)) upgradedGroups.push(structuredClone(CORE_PROMPT_GROUPS[id]));
   }
   return upgradedGroups;
+}
+
+function upgradePublicPrompts(prompts) {
+  const existing = Array.isArray(prompts) ? prompts : [];
+  const builtInIds = new Set(PUBLIC_PROMPT_TEMPLATES.map((template) => template.id));
+  return [
+    ...structuredClone(PUBLIC_PROMPT_TEMPLATES),
+    ...existing.filter((template) => !builtInIds.has(template.id)),
+  ];
 }
 
 function upgradeVisualStyleGroup(group) {
@@ -334,11 +354,14 @@ function saveStylePrompt() {
 }
 
 function applySavedState(saved) {
-  if (![6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
+  if (![6, 7, 8, 9, 10, 11, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
     state.schemaVersion = CURRENT_SCHEMA_VERSION;
     state.promptGroups = upgradeCorePromptGroups(state.promptGroups);
+    state.publicPrompts = upgradePublicPrompts(state.publicPrompts);
+    const sceneLibrary = state.promptLibrary.find((group) => group.id === 'group-scene');
+    if (sceneLibrary) sceneLibrary.options = structuredClone(CORE_PROMPT_GROUPS['group-scene'].options);
     if (!saved.studio?.universalPrompt || saved.studio.universalPrompt === LEGACY_UNIVERSAL_PROMPT) state.studio.universalPrompt = DEFAULT_UNIVERSAL_PROMPT;
     if (saved.schemaVersion === 6) { state.studio.generationMode = 'quality'; state.studio.model = providerConfig(state.studio.provider).profiles.quality.code; }
   }
@@ -742,7 +765,7 @@ function renderPromptDialog() {
   const dialogId = state.ui.promptDialogGroupId;
   if (!dialogId) return '';
   if (dialogId === 'library') {
-    return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-library-title"><div class="modal-header"><div><h2 id="prompt-library-title">添加提示词组</h2><p>选择一个词组加入当前配方，之后可继续编辑词条。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组库">${svgIcon('x')}</button></div><div class="library-group-list">${state.promptLibrary.map((group) => `<button data-action="add-library-group" data-id="${group.id}" ${state.promptGroups.some((item) => item.id === group.id) ? 'disabled' : ''}><span>${svgIcon('layers')}</span><span><strong>${escapeHtml(group.name)}</strong><small>${group.options.map(escapeHtml).join('、')}</small></span>${state.promptGroups.some((item) => item.id === group.id) ? '<em>已添加</em>' : svgIcon('chevron')}</button>`).join('')}</div><div class="custom-group-form"><label for="custom-group-name">自定义词组名称</label><div><input id="custom-group-name" class="input-control" placeholder="例如：节日主题"><button class="button button--secondary" data-action="create-custom-group">创建词组</button></div></div></section></div>`;
+    return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-library-title"><div class="modal-header"><div><h2 id="prompt-library-title">添加提示词组</h2><p>选择一个词组加入当前配方，之后可继续编辑词条。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭词组库">${svgIcon('x')}</button></div><div class="library-group-list">${state.promptLibrary.map((group) => `<button data-action="add-library-group" data-id="${group.id}" ${state.promptGroups.some((item) => item.id === group.id) ? 'disabled' : ''}><span>${svgIcon('layers')}</span><span><strong>${escapeHtml(group.name)}</strong><small>${group.options.map((option) => escapeHtml(typeof option === 'string' ? option : option.label)).join('、')}</small></span>${state.promptGroups.some((item) => item.id === group.id) ? '<em>已添加</em>' : svgIcon('chevron')}</button>`).join('')}</div><div class="custom-group-form"><label for="custom-group-name">自定义词组名称</label><div><input id="custom-group-name" class="input-control" placeholder="例如：节日主题"><button class="button button--secondary" data-action="create-custom-group">创建词组</button></div></div></section></div>`;
   }
   const group = state.promptGroups.find((item) => item.id === dialogId);
   if (!group) return '';

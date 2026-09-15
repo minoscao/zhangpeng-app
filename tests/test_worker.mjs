@@ -102,8 +102,12 @@ assert.equal(qualityRequest.model, 'qwen-image-3.0-pro');
 assert.equal(qualityRequest.parameters.prompt_extend, false);
 assert.equal(qualityRequest.parameters.prompt_extend_mode, undefined);
 assert.equal(qualityRequest.parameters.enable_thinking, undefined);
+assert.equal(qualityRequest.parameters.size, '2048*1536');
 assert.match(qualityRequest.parameters.negative_prompt, /参考图白底/);
 assert.match(qualityRequest.parameters.negative_prompt, /错误城市/);
+assert.match(qualityRequest.parameters.negative_prompt, /模糊人脸/);
+assert.match(qualityRequest.parameters.negative_prompt, /多个消失点/);
+assert.match(qualityRequest.parameters.negative_prompt, /阴影方向冲突/);
 assert.match(cityRequest.messages[0].content, /只选择一个最有把握/);
 
 console.log('Worker OpenAI integration tests passed.');
