@@ -45,12 +45,12 @@ const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 const PUBLIC_PROMPT_TEMPLATES = [
   { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。没有明确要求人物时不要自行添加人物，避免无意义地增加画面复杂度。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
   { id: 'cabin', name: '木屋自然庭院', prompt: '帐篷位于开阔自然庭院，后方必须有清楚可辨的真实小木屋、木质立面和自然植被。采用所选地区的住宅与景观风格，不要求城市地标；地域规则中的天际线是备选，不得替代本模板指定的小木屋。' },
-  { id: 'family', name: '亲子生活摄影', prompt: '只安排一名与产品适用年龄一致的儿童在帐篷入口旁进行简单、静止、自然的阅读或整理靠垫动作；人物和帐篷位于同一地面与清晰焦平面，三分之四侧脸的眼睛、鼻子、嘴和脸部轮廓清楚自然。帐篷关键开口与支架完整可见，必须落实所选城市背景与产品面料配色。禁止多人拥挤、奔跑、挥手、遮脸或双手抓握复杂支架。' },
+  { id: 'family', name: '亲子生活摄影', prompt: '只安排一名与产品适用年龄一致的儿童坐在帐篷入口门槛，身体一半在篷内、一半在篷外；一只手轻扶软质门帘边缘，另一只手自然放在膝上或打开的书本旁，头部与视线朝向帐篷内部，明确表现进入、阅读或整理入口的真实互动。人物和帐篷位于同一地面与清晰焦平面，三分之四侧脸的眼睛、鼻子、嘴和脸部轮廓清楚自然。帐篷关键开口与支架完整可见，必须落实所选城市背景与产品面料配色。禁止人物站在旁边摆拍、远离、背对或忽视帐篷；禁止多人拥挤、奔跑、挥手、遮脸、手穿透面料或双手抓握复杂支架。' },
   { id: 'white', name: '白底电商精修', backgroundMode: 'none', prompt: '输出纯白背景真实产品摄影，帐篷完整居中且比例准确、面料纹理与接触阴影清晰。不出现人物、建筑、城市景观或道具；此模板不使用当地背景规则，只落实产品配色和产品细节。' },
 ];
 const LEGACY_UNIVERSAL_PROMPT = '保持参考图中儿童帐篷的结构、比例、开口与支架准确，真实高端商业摄影，童趣但不幼稚，主体完整，画面干净，不添加文字、商标与水印。';
@@ -355,7 +355,7 @@ function saveStylePrompt() {
 }
 
 function applySavedState(saved) {
-  if (![6, 7, 8, 9, 10, 11, CURRENT_SCHEMA_VERSION].includes(saved?.schemaVersion) || !Array.isArray(saved.products)) return;
+  if (!Number.isInteger(saved?.schemaVersion) || saved.schemaVersion < 6 || saved.schemaVersion > CURRENT_SCHEMA_VERSION || !Array.isArray(saved.products)) return;
   state = { ...structuredClone(seedState), ...saved, studio: { ...seedState.studio, ...(saved.studio || {}) }, batch: { ...seedState.batch, ...(saved.batch || {}) }, ui: { ...seedState.ui, ...(saved.ui || {}) }, connection: { ...seedState.connection, ...(saved.connection || {}) } };
   if (saved.schemaVersion < CURRENT_SCHEMA_VERSION) {
     state.schemaVersion = CURRENT_SCHEMA_VERSION;

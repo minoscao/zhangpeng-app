@@ -120,5 +120,8 @@ await worker.fetch(new Request('https://app.example/api/qwen/generate', {
 }), env);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /第二个人/);
 assert.match(qwenRequests.at(-1).parameters.negative_prompt, /额外人物/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物与帐篷无互动/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /人物在帐篷旁边摆拍/);
+assert.match(qwenRequests.at(-1).parameters.negative_prompt, /手穿透帐篷/);
 
 console.log('Worker OpenAI integration tests passed.');
