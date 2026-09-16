@@ -1,6 +1,7 @@
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const DASHSCOPE_MODELS_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const MAPS_GROUNDING_ENDPOINT = 'https://mapstools.googleapis.com/mcp';
 const QWEN_VISION_MODEL = 'qwen3-vl-flash';
 const QWEN_GENERATION_PROFILES = Object.freeze({
   fast: Object.freeze({ model: 'qwen-image-3.0', enableThinking: false, promptExtend: false }),
@@ -16,7 +17,7 @@ const MAX_PROMPT_LENGTH = 6000;
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const TASK_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{6,128}$/;
-const UPSTREAM_TIMEOUTS = Object.freeze({ validate: 20000, submit: 60000, task: 20000, image: 180000, city: 45000 });
+const UPSTREAM_TIMEOUTS = Object.freeze({ validate: 20000, submit: 60000, task: 20000, image: 180000, city: 45000, maps: 30000 });
 const SIZE_BY_RATIO = Object.freeze({
   '1:1': '1280*1280',
   '3:4': '960*1280',
@@ -107,6 +108,11 @@ function openAiApiKey(request) {
   return /^sk-[A-Za-z0-9._-]{16,512}$/.test(key) ? key : '';
 }
 
+function googleMapsApiKey(request) {
+  const key = (request.headers.get('X-Google-Maps-Api-Key') || '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
+  return /^AIza[A-Za-z0-9_-]{20,100}$/.test(key) ? key : '';
+}
+
 async function readJsonBody(request) {
   const declaredLength = Number(request.headers.get('Content-Length') || 0);
   if (declaredLength > MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE');
@@ -165,10 +171,85 @@ function prioritizePeoplePrompt(prompt, expectedPeople) {
   return `${priority}\n${prompt}`.slice(0, MAX_PROMPT_LENGTH);
 }
 
-function prioritizeReferenceRoles(prompt, sceneReferenceAttached) {
-  if (!sceneReferenceAttached) return prompt;
-  const roleRule = '【两张参考图职责｜顺序不可混淆】图1是帐篷产品参考图：只提取帐篷结构、轮廓、开口、支架、缝线与比例。图2是经用户核验的 Google Maps 实景参考图：以它作为真实场地底稿，保留建筑、道路、地面、植被、地形、光线、机位与单一透视，再把图1帐篷自然放入图2的可用位置。不得把图2中的路人、车辆、地图界面、图钉、店名、道路文字、车牌、水印带入成片；不得用想象中的通用城市替换图2。';
+function prioritizeGroundedScene(prompt, sceneGrounded) {
+  if (!sceneGrounded) return prompt;
+  const roleRule = '【参考与地图依据职责】输入图片只定义帐篷产品的结构、轮廓、开口、支架、缝线与比例，不沿用它的旧背景。地域场景必须服从提示词中的 Google Maps Grounding Lite 检索摘要与地点要求；不得生成 Google Maps 界面、地图标注、店名、道路文字、车牌或水印。';
   return `${roleRule}\n${prompt}`.slice(0, MAX_PROMPT_LENGTH);
+}
+
+function parseMcpEnvelope(raw) {
+  try { return JSON.parse(raw); } catch { /* streamable HTTP may return SSE */ }
+  const dataLines = raw.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).filter((line) => line && line !== '[DONE]');
+  for (let index = dataLines.length - 1; index >= 0; index -= 1) {
+    try { return JSON.parse(dataLines[index]); } catch { /* try previous event */ }
+  }
+  throw new Error('MAPS_INVALID_RESPONSE');
+}
+
+function mapsToolPayload(envelope) {
+  if (envelope?.error) throw new Error(String(envelope.error?.message || 'MAPS_TOOL_ERROR'));
+  const result = envelope?.result || envelope;
+  if (result?.isError) throw new Error(String(result.content?.[0]?.text || 'MAPS_TOOL_ERROR'));
+  if (result?.structuredContent && typeof result.structuredContent === 'object') return result.structuredContent;
+  for (const block of result?.content || []) {
+    if (block?.type !== 'text' || typeof block.text !== 'string') continue;
+    try { return JSON.parse(block.text); } catch { /* some servers return plain summary text */ }
+  }
+  if (Array.isArray(result?.places) || typeof result?.summary === 'string') return result;
+  throw new Error('MAPS_INVALID_RESULT');
+}
+
+function safeGoogleMapsUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && /(^|\.)google\.[a-z.]+$/i.test(url.hostname) ? url.href : '';
+  } catch { return ''; }
+}
+
+function validSceneGrounding(value) {
+  const expiresAt = new Date(value?.expiresAt || 0).getTime();
+  return Boolean(value?.verified === true && expiresAt > Date.now() && typeof value.summary === 'string' && value.summary.trim() && Array.isArray(value.sources) && value.sources.some((source) => safeGoogleMapsUrl(source?.url)));
+}
+
+async function groundSceneWithMaps(request, apiKey) {
+  let body;
+  try { body = await readJsonBody(request); }
+  catch { return jsonResponse({ error: { code: 'INVALID_JSON', message: '地图场景检索请求格式无效。' } }, 400); }
+  const location = typeof body.location === 'string' ? body.location.trim() : '';
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  const copy = typeof body.copy === 'string' ? body.copy.trim() : '';
+  if (!location || location.length > 120 || !copy || copy.length > 6000) return jsonResponse({ error: { code: 'INVALID_MAPS_QUERY', message: '地点和场景文案需完整，且总长度不能超过 6000 字。' } }, 400);
+  const textQuery = [`在 ${location} 寻找适合儿童帐篷商业摄影的真实地点`, description, copy, '优先开放、安全、平坦且具有明确地域识别度的公园、水岸、庭院或露台；只选与文案最相符的地点并给出地图来源。'].filter(Boolean).join('。').slice(0, 7000);
+  const upstream = await fetchUpstream(MAPS_GROUNDING_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'X-Goog-Api-Key': apiKey },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_places', arguments: { textQuery, languageCode: 'zh_CN' } } }),
+  }, UPSTREAM_TIMEOUTS.maps);
+  const raw = await upstream.text();
+  if (!upstream.ok) {
+    const invalidKey = upstream.status === 401 || upstream.status === 403;
+    return jsonResponse({ error: { code: invalidKey ? 'MAPS_KEY_INVALID' : upstream.status === 429 ? 'MAPS_RATE_LIMITED' : 'MAPS_UPSTREAM_ERROR', message: invalidKey ? 'Google Maps API Key 无效，或尚未启用 Maps Grounding Lite API 与计费。' : upstream.status === 429 ? 'Google Maps 检索频率已达上限，请稍后重试。' : `Google Maps 自动检索失败（${upstream.status}），请稍后重试。` } }, invalidKey ? 401 : upstream.status === 429 ? 429 : 502);
+  }
+  let payload;
+  try { payload = mapsToolPayload(parseMcpEnvelope(raw)); }
+  catch (error) {
+    const detail = String(error?.message || '');
+    const invalidKey = /api.?key|credential|permission|unauthenticated|not enabled|billing/i.test(detail);
+    return jsonResponse({ error: { code: invalidKey ? 'MAPS_KEY_INVALID' : 'MAPS_INVALID_RESULT', message: invalidKey ? 'Google Maps API Key 无效，或尚未启用 Maps Grounding Lite API 与计费。' : 'Google Maps 返回的地点数据无法解析，请重试。' } }, invalidKey ? 401 : 502);
+  }
+  const places = Array.isArray(payload.places) ? payload.places : [];
+  const sources = places.slice(0, 5).map((place, index) => ({
+    placeId: String(place?.id || '').slice(0, 256),
+    title: String(place?.attribution?.title || `Google Maps 地点 ${index + 1}`).slice(0, 160),
+    url: safeGoogleMapsUrl(place?.googleMapsLinks?.placeUrl || place?.attribution?.url || ''),
+    latitude: Number.isFinite(place?.location?.latitude) ? place.location.latitude : null,
+    longitude: Number.isFinite(place?.location?.longitude) ? place.location.longitude : null,
+  })).filter((source) => source.url);
+  const summary = typeof payload.summary === 'string' ? payload.summary.trim().slice(0, 3000) : '';
+  if (!summary || !sources.length) return jsonResponse({ error: { code: 'MAPS_NO_MATCH', message: `Google Maps 没有找到与“${location}”当前文案足够匹配的地点，请调整地点或场景要求后重试。` } }, 422);
+  const resolvedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  return jsonResponse({ grounding: { provider: 'google-maps-grounding-lite', query: textQuery, summary, sources, resolvedAt, expiresAt } });
 }
 
 function upstreamErrorMessage(data, status) {
@@ -232,10 +313,7 @@ async function createQwenTask(request, env, apiKey) {
 
   const profile = qwenGenerationProfile(body.generationMode);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
-  const sceneReferenceAttached = body.sceneReferenceAttached === true;
-  if (locationRequired && (!sceneReferenceAttached || referenceImages.length < 2)) {
-    return jsonResponse({ error: { code: 'SCENE_REFERENCE_REQUIRED', message: '当地背景任务必须同时上传产品图和经 Google Maps 核验的实景截图。' } }, 400);
-  }
+  const sceneGrounded = validSceneGrounding(body.sceneGrounding);
   const expectedPeople = expectedPeopleFromPrompt(prompt);
   const noPeopleRequired = expectedPeople === 0;
   const peopleRequired = Number.isInteger(expectedPeople) && expectedPeople > 0;
@@ -244,7 +322,10 @@ async function createQwenTask(request, env, apiKey) {
     try { repairImageUrl = validateQwenResultImageUrl(body.repairImageUrl); }
     catch { return jsonResponse({ error: { code: 'INVALID_RESULT_IMAGE', message: '自动修复只能使用刚刚由千问生成的有效图片。' } }, 400); }
   }
-  const effectivePrompt = prioritizeReferenceRoles(prioritizePeoplePrompt(prompt, expectedPeople), sceneReferenceAttached);
+  if (locationRequired && !sceneGrounded && !repairImageUrl) {
+    return jsonResponse({ error: { code: 'SCENE_GROUNDING_REQUIRED', message: '当地背景任务必须先按当前文案完成 Google Maps Grounding Lite 自动检索。' } }, 400);
+  }
+  const effectivePrompt = prioritizeGroundedScene(prioritizePeoplePrompt(prompt, expectedPeople), sceneGrounded || Boolean(repairImageUrl));
   const content = [...(repairImageUrl ? [{ image: repairImageUrl }] : referenceImages.map((image) => ({ image }))), { text: effectivePrompt }];
   const qualitySize = body.generationMode === 'quality' ? QWEN_QUALITY_SIZE_BY_RATIO : SIZE_BY_RATIO;
   if (body.generationMode === 'wan' && prompt.length > 2000) return jsonResponse({ error: { code: 'INVALID_PROMPT', message: '万相 2.6 的提示词上限为 2000 字，请精简公共模板或补充要求；系统不会截断关键需求。' } }, 400);
@@ -257,7 +338,7 @@ async function createQwenTask(request, env, apiKey) {
       peopleRequired ? `超过${expectedPeople}名儿童，第${expectedPeople + 1}个人，额外人物，成人，人群，路人，远景人影，人物剪影，额外手脚，人物倒影，照片人物，屏幕人像` : '',
       peopleRequired ? '任一人物与帐篷无互动，人物远离帐篷，人物独立站立，人物在帐篷旁边摆拍，人物背对帐篷，人物忽视帐篷，手未接触帐篷，手穿透帐篷，错误接触关系，错误前后遮挡' : '',
       '拼贴感，舞台布景，假景片，多个消失点，地平线错位，建筑倾斜，地标比例过大，帐篷悬浮，物体穿插，阴影方向冲突，杂乱道具，过度背景虚化',
-      sceneReferenceAttached ? 'Google Maps界面，地图控件，地图图钉，道路文字，店名，车牌，水印，实景截图中的原路人，实景截图中的原车辆，想象的通用城市背景' : '',
+      sceneGrounded ? 'Google Maps界面，地图控件，地图图钉，道路文字，店名，车牌，水印，想象的通用城市背景' : '',
       locationRequired ? '参考图白底，透明背景，摄影棚背景，纯色背景，普通无名草坪，通用住宅，错误城市，缺失地标，地标无法辨认，背景过度虚化' : '',
     ].filter(Boolean).join('，'),
     size: qualitySize[body.ratio] || qualitySize['4:3'],
@@ -419,15 +500,15 @@ async function createOpenAiImage(request, env, apiKey) {
   }
   if (!referenceImages.length) return jsonResponse({ error: { code: 'REFERENCE_REQUIRED', message: '请先选择至少一张产品参考图。' } }, 400);
   const locationRequired = prompt.includes('【地域场景硬约束｜不可省略】');
-  const sceneReferenceAttached = body.sceneReferenceAttached === true;
-  if (locationRequired && (!sceneReferenceAttached || referenceImages.length < 2)) {
-    return jsonResponse({ error: { code: 'SCENE_REFERENCE_REQUIRED', message: '当地背景任务必须同时上传产品图和经 Google Maps 核验的实景截图。' } }, 400);
+  const sceneGrounded = validSceneGrounding(body.sceneGrounding);
+  if (locationRequired && !sceneGrounded) {
+    return jsonResponse({ error: { code: 'SCENE_GROUNDING_REQUIRED', message: '当地背景任务必须先按当前文案完成 Google Maps Grounding Lite 自动检索。' } }, 400);
   }
 
   const profile = openAiGenerationProfile(body.generationMode);
   const form = new FormData();
   form.append('model', profile.model);
-  form.append('prompt', `${prioritizeReferenceRoles(prompt, sceneReferenceAttached)}\n禁止出现文字、商标、水印、Google Maps 界面或控件、地图图钉、道路文字、车牌、错误支架、多余结构、模糊或廉价塑料质感。`);
+  form.append('prompt', `${prioritizeGroundedScene(prompt, sceneGrounded)}\n禁止出现文字、商标、水印、Google Maps 界面或控件、地图图钉、道路文字、车牌、错误支架、多余结构、模糊或廉价塑料质感。`);
   form.append('quality', profile.quality);
   form.append('size', OPENAI_SIZE_BY_RATIO[body.ratio] || OPENAI_SIZE_BY_RATIO['4:3']);
   form.append('output_format', 'jpeg');
@@ -508,6 +589,12 @@ async function planCity(request, env, apiKey, provider) {
 async function handleApi(request, env) {
   const url = new URL(request.url);
   if (url.pathname === '/api/config' && request.method === 'GET') return jsonResponse(publicConfig(env));
+
+  if (url.pathname === '/api/maps/ground-scene' && request.method === 'POST') {
+    const apiKey = googleMapsApiKey(request);
+    if (!apiKey) return jsonResponse({ error: { code: 'KEY_REQUIRED', message: '请先输入有效的 Google Maps Platform API Key。' } }, 401);
+    return groundSceneWithMaps(request, apiKey);
+  }
 
   if (url.pathname.startsWith('/api/qwen/')) {
     const apiKey = qwenApiKey(request);

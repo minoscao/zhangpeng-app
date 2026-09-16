@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import worker from '../worker.js';
 
 const apiKey = 'sk-test-openai-1234567890';
+const googleMapsKey = 'AIzaTestGoogleMapsGroundingLiteKey123456';
 let editRequest;
 let cityRequest;
 let inspectionRequest;
@@ -10,6 +11,14 @@ const qwenRequests = [];
 
 globalThis.fetch = async (input, init = {}) => {
   const url = String(input);
+  if (url === 'https://mapstools.googleapis.com/mcp') {
+    assert.equal(init.headers['X-Goog-Api-Key'], googleMapsKey);
+    const request = JSON.parse(init.body);
+    assert.equal(request.method, 'tools/call');
+    assert.equal(request.params.name, 'search_places');
+    assert.match(request.params.arguments.textQuery, /悉尼/);
+    return Response.json({ result: { structuredContent: { summary: '悉尼海港沿岸的开阔公园与歌剧院视角适合当前儿童帐篷场景。[0]', places: [{ id: 'sydney-opera-house', googleMapsLinks: { placeUrl: 'https://www.google.com/maps/place/Sydney+Opera+House' }, attribution: { title: 'Sydney Opera House · Google Maps', url: 'https://www.google.com/maps/place/Sydney+Opera+House' }, location: { latitude: -33.8568, longitude: 151.2153 } }] } } });
+  }
   if (url.endsWith('/models')) {
     assert.equal(init.headers.Authorization, `Bearer ${apiKey}`);
     return Response.json({ data: [] });
@@ -55,6 +64,17 @@ const config = await configResponse.json();
 assert.deepEqual(config.providers, ['openai', 'qwen']);
 assert.equal(config.model, 'gpt-image-2');
 
+const mapsResponse = await worker.fetch(new Request('https://app.example/api/maps/ground-scene', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Google-Maps-Api-Key': googleMapsKey },
+  body: JSON.stringify({ location: '澳大利亚·悉尼', description: '歌剧院与海港水岸', copy: '城市水岸公园，远景显示悉尼歌剧院，儿童帐篷位于连续草地。' }),
+}), env);
+const mapsGrounding = await mapsResponse.json();
+assert.equal(mapsResponse.status, 200);
+assert.match(mapsGrounding.grounding.summary, /悉尼海港/);
+assert.equal(mapsGrounding.grounding.sources[0].placeId, 'sydney-opera-house');
+assert.match(mapsGrounding.grounding.sources[0].url, /^https:\/\/www\.google\.com\/maps/);
+
 const validateResponse = await worker.fetch(new Request('https://app.example/api/openai/validate', {
   method: 'POST',
   headers: { 'X-OpenAI-Api-Key': apiKey },
@@ -98,26 +118,27 @@ for (const prompt of ['生成真实帐篷产品场景', 'a'.repeat(2001)]) {
 assert.ok(wanRequest);
 
 const regionalPrompt = '【地域场景硬约束｜不可省略】必须彻底移除参考图白底，并清楚显示悉尼歌剧院。\n【人物数量硬约束｜0人】画面完全无人，人物数量必须严格等于 0。';
+const sceneGrounding = { verified: true, summary: mapsGrounding.grounding.summary, sources: mapsGrounding.grounding.sources, resolvedAt: mapsGrounding.grounding.resolvedAt, expiresAt: mapsGrounding.grounding.expiresAt };
 const openAiSceneResponse = await worker.fetch(new Request('https://app.example/api/openai/generate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-OpenAI-Api-Key': apiKey },
-  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,c3RyZWV0'], sceneReferenceAttached: true, generationMode: 'fast', ratio: '4:3' }),
+  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo='], sceneGrounding, generationMode: 'fast', ratio: '4:3' }),
 }), env);
 assert.equal(openAiSceneResponse.status, 200);
-assert.equal(editRequest.body.getAll('image[]').length, 2);
-assert.match(editRequest.body.get('prompt'), /图1是帐篷产品参考图/);
-assert.match(editRequest.body.get('prompt'), /图2是经用户核验的 Google Maps 实景参考图/);
+assert.equal(editRequest.body.getAll('image[]').length, 1);
+assert.match(editRequest.body.get('prompt'), /输入图片只定义帐篷产品/);
+assert.match(editRequest.body.get('prompt'), /Google Maps Grounding Lite/);
 const missingSceneResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
   body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo='], generationMode: 'quality', ratio: '4:3' }),
 }), env);
 assert.equal(missingSceneResponse.status, 400);
-assert.equal((await missingSceneResponse.json()).error.code, 'SCENE_REFERENCE_REQUIRED');
+assert.equal((await missingSceneResponse.json()).error.code, 'SCENE_GROUNDING_REQUIRED');
 const qwenQualityResponse = await worker.fetch(new Request('https://app.example/api/qwen/generate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Qwen-Api-Key': apiKey },
-  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,c3RyZWV0'], sceneReferenceAttached: true, generationMode: 'quality', ratio: '4:3' }),
+  body: JSON.stringify({ prompt: regionalPrompt, referenceImages: ['data:image/png;base64,iVBORw0KGgo='], sceneGrounding, generationMode: 'quality', ratio: '4:3' }),
 }), env);
 assert.equal(qwenQualityResponse.status, 202);
 const qualityRequest = qwenRequests.at(-1);
@@ -135,9 +156,9 @@ assert.match(qualityRequest.parameters.negative_prompt, /人物倒影/);
 assert.match(qualityRequest.parameters.negative_prompt, /多个消失点/);
 assert.match(qualityRequest.parameters.negative_prompt, /阴影方向冲突/);
 assert.match(qualityRequest.parameters.negative_prompt, /Google Maps界面/);
-assert.equal(qualityRequest.input.messages[0].content.filter((item) => item.image).length, 2);
-assert.match(qualityRequest.input.messages[0].content.at(-1).text, /图1是帐篷产品参考图/);
-assert.match(qualityRequest.input.messages[0].content.at(-1).text, /图2是经用户核验的 Google Maps 实景参考图/);
+assert.equal(qualityRequest.input.messages[0].content.filter((item) => item.image).length, 1);
+assert.match(qualityRequest.input.messages[0].content.at(-1).text, /输入图片只定义帐篷产品/);
+assert.match(qualityRequest.input.messages[0].content.at(-1).text, /地域场景必须服从提示词中的 Google Maps Grounding Lite/);
 assert.match(cityRequest.messages[0].content, /只选择一个最有把握/);
 
 await worker.fetch(new Request('https://app.example/api/qwen/generate', {

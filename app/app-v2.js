@@ -43,9 +43,10 @@ const QWEN_SUBMISSION_WINDOW_MS = 60000;
 const QWEN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const QWEN_KEY_STORAGE = 'designflow-qwen-api-key';
 const OPENAI_KEY_STORAGE = 'designflow-openai-api-key';
+const GOOGLE_MAPS_KEY_STORAGE = 'designflow-google-maps-api-key';
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const referenceImageCache = new Map();
-const CURRENT_SCHEMA_VERSION = 15;
+const CURRENT_SCHEMA_VERSION = 16;
 const PUBLIC_PROMPT_TEMPLATES = [
   { id: 'brief', name: '需求优先 · 商业场景', prompt: '优先满足本张产品结构、产品配色、当地背景和其他要求。输入参考图只定义帐篷产品，必须替换其原有白底、透明底、摄影棚或旧场景；不能用漂亮但无关的通用背景代替指定环境。要求的城市地标或地域建筑必须清楚可辨，不可用过度虚化隐藏。人物数量只服从“出现人数”选项，不得自行增减。' },
   { id: 'skyline', name: '城市天际线', prompt: '帐篷位于城市水岸公园或开阔露台，远景必须清楚呈现所选城市可识别的天际线与至少一个当地建筑线索。地域规则中的住宅或庭院是备选，不得替代本模板要求的城市天际线。地标尺度与视角可信，帐篷在前景完整可见。' },
@@ -267,8 +268,13 @@ let keyDialogOpen = false;
 let keyDialogError = '';
 let pendingKeyAction = '';
 let keyDialogProvider = 'openai';
+let mapsKeyDialogOpen = false;
+let mapsKeyDialogError = '';
+let pendingMapsAction = '';
 let imagePreview = null;
 let cityPlannerBusy = false;
+let locationGroundingBusy = false;
+let locationGroundingError = '';
 let cityDraft = '';
 let cityPlannerError = '';
 let regionPreviewId = '';
@@ -324,10 +330,8 @@ function upgradeCorePromptGroups(groups) {
         ...structuredClone(option),
         selected: existing?.selected ?? option.selected,
         quantity: Math.max(1, Number(existing?.quantity) || option.quantity),
-        ...(group.id === 'group-location' && existing?.sceneReferenceImage ? {
-          sceneReferenceImage: existing.sceneReferenceImage,
-          sceneReferenceName: existing.sceneReferenceName || '已上传实景截图',
-          sceneReferenceUpdatedAt: existing.sceneReferenceUpdatedAt || '',
+        ...(group.id === 'group-location' && existing?.sceneGrounding ? {
+          sceneGrounding: existing.sceneGrounding,
         } : {}),
       };
     });
@@ -387,6 +391,13 @@ function applySavedState(saved) {
     if (saved.schemaVersion === 6) { state.studio.generationMode = 'quality'; state.studio.model = providerConfig(state.studio.provider).profiles.quality.code; }
   }
   state.promptGroups = state.promptGroups.map((group) => group.id === 'group-style' ? upgradeVisualStyleGroup(group) : group);
+  const now = Date.now();
+  state.promptGroups.find((group) => group.id === 'group-location')?.options.forEach((option) => {
+    delete option.sceneReferenceImage;
+    delete option.sceneReferenceName;
+    delete option.sceneReferenceUpdatedAt;
+    if (option.sceneGrounding && (!option.sceneGrounding.expiresAt || new Date(option.sceneGrounding.expiresAt).getTime() <= now)) delete option.sceneGrounding;
+  });
   const styleLibrary = state.promptLibrary.find((group) => group.id === 'group-style');
   if (styleLibrary) styleLibrary.options = [...new Set([...VISUAL_STYLE_OPTIONS.map((option) => option.label), ...(Array.isArray(styleLibrary.options) ? styleLibrary.options : [])])];
   if (!saved.studio?.generationMode) state.studio.generationMode = 'quality';
@@ -480,6 +491,22 @@ function clearProviderApiKey(provider = state.studio.provider) {
   state.connection.authenticated[provider] = false;
 }
 
+function getGoogleMapsApiKey() {
+  try { return sessionStorage.getItem(GOOGLE_MAPS_KEY_STORAGE) || ''; } catch { return ''; }
+}
+
+function setGoogleMapsApiKey(value) {
+  try { sessionStorage.setItem(GOOGLE_MAPS_KEY_STORAGE, value); return true; } catch { return false; }
+}
+
+function clearGoogleMapsApiKey() {
+  try { sessionStorage.removeItem(GOOGLE_MAPS_KEY_STORAGE); } catch { /* restricted browser storage */ }
+}
+
+function isGoogleMapsApiKey(value) {
+  return /^AIza[A-Za-z0-9_-]{20,100}$/.test(String(value || ''));
+}
+
 function normalizeApiKey(value) {
   return String(value || '').replace(/\\([_.-])/g, '$1').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
 }
@@ -528,6 +555,7 @@ function syncResultAsset(result) {
     image: result.image,
     tags: [...new Set([...(result.tags || []).map((tag) => tag.split('：')[1] || tag), reviewLabel])],
     prompt: result.prompt,
+    sceneGrounding: result.sceneGrounding ? structuredClone(result.sceneGrounding) : null,
     model: result.model,
     provider: result.provider,
     generationMode: result.generationMode,
@@ -621,21 +649,50 @@ function locationEvidenceRequired() {
   return template?.id !== 'white' && template?.backgroundMode !== 'none' && group?.enabled && selectedOptions(group).length > 0;
 }
 
+function locationSearchContext(option) {
+  const sceneGroup = state.promptGroups.find((group) => group.id === 'group-scene');
+  return [
+    `地点：${option?.label || ''}`,
+    option?.description ? `地点线索：${option.description}` : '',
+    option?.prompt ? `地域要求：${option.prompt}` : '',
+    activePublicPrompt()?.prompt ? `成片任务：${activePublicPrompt().prompt}` : '',
+    ...(sceneGroup?.enabled ? selectedOptions(sceneGroup).map((item) => `使用场景：${item.prompt || item.label}`) : []),
+    state.studio.otherRequirements?.trim() ? `其他要求：${state.studio.otherRequirements.trim()}` : '',
+  ].filter(Boolean).join('\n').slice(0, 6000);
+}
+
+function locationSearchFingerprint(option) {
+  const value = locationSearchContext(option);
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function locationGroundingIsFresh(option) {
+  const grounding = option?.sceneGrounding;
+  return Boolean(grounding?.summary && grounding?.sources?.length && grounding.requestFingerprint === locationSearchFingerprint(option) && new Date(grounding.expiresAt || 0).getTime() > Date.now());
+}
+
 function selectedLocationsMissingEvidence() {
   if (!locationEvidenceRequired()) return [];
   const group = state.promptGroups.find((item) => item.id === 'group-location');
-  return selectedOptions(group).filter((option) => !option.sceneReferenceImage);
+  return selectedOptions(group).filter((option) => !locationGroundingIsFresh(option));
 }
 
 function googleMapsSearchUrl(option) {
-  const query = [option?.label, option?.description].filter(Boolean).join(' ');
+  const groundedUrl = option?.sceneGrounding?.sources?.[0]?.url;
+  if (groundedUrl) return groundedUrl;
+  const query = [option?.label, option?.description, activePublicPrompt()?.name].filter(Boolean).join(' ');
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function locationEvidenceSummary(group) {
   const chosen = selectedOptions(group);
-  const ready = chosen.filter((option) => option.sceneReferenceImage).length;
-  return chosen.length ? `${ready}/${chosen.length} 个已选地点绑定实景` : '未选择地点';
+  const ready = chosen.filter(locationGroundingIsFresh).length;
+  return chosen.length ? `${ready}/${chosen.length} 个地点已由 Google Maps 自动匹配` : '未选择地点';
 }
 
 function renderPromptGroups() {
@@ -648,7 +705,7 @@ function renderPromptGroups() {
       : `<button class="toggle-control" data-action="toggle-prompt-group" data-id="${group.id}" aria-pressed="${group.enabled}"><span></span>${group.enabled ? '启用' : '停用'}</button>`;
     const deleteButton = requiredPeopleGroup ? '' : `<button class="icon-button button--quiet" data-action="delete-prompt-group" data-id="${group.id}" aria-label="删除${escapeHtml(group.name)}">${svgIcon('trash')}</button>`;
     const groupMeta = group.id === 'group-location' && group.enabled ? locationEvidenceSummary(group) : options.length ? `${groupFactor(group)} 个组合值` : '未选择选项';
-    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(groupMeta)}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip${group.id === 'group-location' ? (option.sceneReferenceImage ? ' is-verified' : ' is-warning') : ''}"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)}${group.id === 'group-location' ? ` · ${option.sceneReferenceImage ? '实景已绑定' : '待绑定实景'}` : ''} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions">${groupToggle}<button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button>${deleteButton}</div></article>`;
+    return `<article class="prompt-group-row ${group.enabled ? '' : 'is-disabled'}"><div class="prompt-group-name"><span>${svgIcon('layers')}</span><div><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(groupMeta)}</small></div></div><div class="prompt-chip-list">${options.length ? options.map((option) => `<span class="prompt-chip${group.id === 'group-location' ? (locationGroundingIsFresh(option) ? ' is-verified' : ' is-warning') : ''}"${option.description ? ` title="${escapeHtml(option.description)}"` : ''}>${escapeHtml(group.id === 'group-shot' ? `${option.label} · ${option.description.split(' · ')[0]}` : option.label)}${group.id === 'group-location' ? ` · ${locationGroundingIsFresh(option) ? '地图已匹配' : '待自动检索'}` : ''} <b>×${option.quantity}</b></span>`).join('') : '<span class="muted-copy">点击编辑选择词条</span>'}</div><div class="prompt-row-actions">${groupToggle}<button class="button button--quiet" data-action="edit-prompt-group" data-id="${group.id}">${svgIcon('edit')}编辑</button>${deleteButton}</div></article>`;
   }).join('')}</div>${state.promptGroups.some((group) => group.id === 'group-location') ? '' : '<button class="button button--secondary" data-action="open-location">添加当地背景</button>'}`;
 }
 
@@ -661,13 +718,15 @@ function renderPublicPromptArea() {
 
 function renderLocationEditor(group) {
   const selected = selectedOptions(group);
-  const missing = selected.filter((option) => !option.sceneReferenceImage);
+  const missing = selected.filter((option) => !locationGroundingIsFresh(option));
   const optionCards = group.options.map((option) => {
     const mapsUrl = googleMapsSearchUrl(option);
-    const evidenceStatus = option.sceneReferenceImage ? '实景已绑定' : '待绑定实景';
-    return `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}" ${cityPlannerBusy ? 'disabled' : ''}><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '展开查看背景规则')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量" ${cityPlannerBusy ? 'disabled' : ''}>＋</button></div></div><div class="scene-reference ${option.sceneReferenceImage ? 'is-ready' : ''}">${option.sceneReferenceImage ? `<button class="scene-reference-preview" type="button" data-action="preview-location-reference" data-id="${option.id}" aria-label="放大查看${escapeHtml(option.label)}实景参考图"><img src="${escapeHtml(option.sceneReferenceImage)}" alt="${escapeHtml(option.label)} Google Maps 实景参考"></button>` : `<div class="scene-reference-empty" aria-hidden="true">${svgIcon('image')}</div>`}<div class="scene-reference-copy"><strong>${escapeHtml(evidenceStatus)}</strong><span>${option.sceneReferenceImage ? `${escapeHtml(option.sceneReferenceName || '已上传实景截图')} · 生成时作为第 2 张参考图` : '先在 Google Maps 进入街景，选定与帐篷落位一致的真实视角，再上传截图。'}</span></div><div class="scene-reference-actions"><a class="button button--secondary" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener noreferrer">在 Google Maps 核验</a><label class="button button--quiet" for="scene-reference-${escapeHtml(option.id)}">${svgIcon('upload')}${option.sceneReferenceImage ? '替换截图' : '上传截图'}</label><input id="scene-reference-${escapeHtml(option.id)}" type="file" accept="image/png,image/jpeg,image/webp" data-scene-reference="${escapeHtml(option.id)}" hidden>${option.sceneReferenceImage ? `<button class="button button--quiet" type="button" data-action="remove-location-reference" data-id="${option.id}">移除</button>` : ''}</div></div><details class="location-rule"><summary>${escapeHtml(option.label)} · 查看或修改文字规则</summary><label for="region-${escapeHtml(option.id)}">补充地标与场景要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></details></div>`;
+    const ready = locationGroundingIsFresh(option);
+    const grounding = option.sceneGrounding;
+    const sources = ready ? grounding.sources.slice(0, 3).map((source, index) => `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title || `Google Maps 地点 ${index + 1}`)}</a>`).join('') : '';
+    return `<div class="location-option"><div class="option-editor ${option.selected ? 'is-selected' : ''}"><button class="option-toggle" data-action="toggle-prompt-option" data-group-id="${group.id}" data-id="${option.id}" aria-pressed="${option.selected}" ${cityPlannerBusy || locationGroundingBusy ? 'disabled' : ''}><span class="option-check">${option.selected ? svgIcon('check') : ''}</span><span class="option-copy"><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description || '展开查看背景规则')}</small></span></button><div class="quantity-control" aria-label="${escapeHtml(option.label)}数量"><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="-1" aria-label="减少${escapeHtml(option.label)}数量" ${cityPlannerBusy || locationGroundingBusy ? 'disabled' : ''}>−</button><span>×${option.quantity}</span><button data-action="change-option-quantity" data-group-id="${group.id}" data-id="${option.id}" data-delta="1" aria-label="增加${escapeHtml(option.label)}数量" ${cityPlannerBusy || locationGroundingBusy ? 'disabled' : ''}>＋</button></div></div><div class="scene-reference ${ready ? 'is-ready' : ''}"><div class="scene-reference-empty" aria-hidden="true">${ready ? svgIcon('check') : svgIcon('search')}</div><div class="scene-reference-copy"><strong>${ready ? 'Google Maps 场景已自动匹配' : '等待自动检索'}</strong><span>${ready ? escapeHtml(grounding.summary) : '确认最终提示词时，系统会按地点、场景文案和模板要求自动检索相符地点。'}</span>${sources ? `<div class="maps-source-links">${sources}</div>` : ''}</div><div class="scene-reference-actions"><button class="button button--secondary" type="button" data-action="ground-location" data-id="${escapeHtml(option.id)}" ${locationGroundingBusy ? 'disabled' : ''}>${locationGroundingBusy && option.selected ? '正在检索…' : ready ? '重新匹配' : '立即自动检索'}</button>${ready ? `<a class="button button--quiet" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener noreferrer">查看地图来源</a>` : ''}</div></div><details class="location-rule"><summary>${escapeHtml(option.label)} · 查看或修改文字规则</summary><label for="region-${escapeHtml(option.id)}">补充地标与场景要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></details></div>`;
   }).join('');
-  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="location-editor-title"><div class="modal-header"><div><h2 id="location-editor-title">当地背景 · 先核验实景再创作</h2><p>每个已选地点都要绑定一张 Google Maps 实景截图。文字规则负责说明，实景截图负责锁定真实建筑、道路、植被、光线与透视。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭当地背景">${svgIcon('x')}</button></div><div class="location-workflow" aria-label="当地背景工作流程"><span><b>1</b>选择地点</span><span><b>2</b>打开地图进入街景</span><span><b>3</b>上传同视角截图</span><span><b>4</b>确认提示词后生成</span></div><div class="city-planner"><label for="city-name">添加城市</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" value="${escapeHtml(cityDraft)}" placeholder="国家或城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help${cityPlannerError ? ' city-planner-error' : ''}" aria-invalid="${Boolean(cityPlannerError)}"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全文字规则…' : '添加并补全文字规则'}</button></div>${cityPlannerError ? `<p id="city-planner-error" class="field-error" role="alert">${escapeHtml(cityPlannerError)}</p>` : ''}<p id="city-planner-help">新增城市的 AI 文字建议不等于实景核验。Google Maps 链接无需额外密钥；打开后进入街景并上传截图，图片仅作为生成时的场景事实参考。</p></div><div class="option-editor-list">${optionCards}</div><div class="modal-actions"><span class="selection-count ${missing.length ? 'has-warning' : ''}">${selected.length ? `${selected.length - missing.length}/${selected.length} 个已选地点已绑定实景${missing.length ? ` · 还缺 ${missing.length} 个` : ''}` : '请至少选择一个地点'}</span><button class="button button--primary" data-action="finish-prompt-editor">完成</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel prompt-editor location-editor" role="dialog" aria-modal="true" aria-labelledby="location-editor-title"><div class="modal-header"><div><h2 id="location-editor-title">当地背景 · 按文案自动检索</h2><p>系统读取城市、场景文案和模板要求，通过 Google Maps Grounding Lite 自动寻找相符地点，并把检索摘要加入最终提示词。无需上传或绑定街景截图。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭当地背景">${svgIcon('x')}</button></div><div class="location-workflow" aria-label="当地背景工作流程"><span><b>1</b>选择地点与场景</span><span><b>2</b>自动检索相符地点</span><span><b>3</b>核对最终提示词并生成</span></div><div class="city-planner"><label for="city-name">添加城市</label><div class="public-prompt-actions"><input id="city-name" class="input-control" maxlength="80" value="${escapeHtml(cityDraft)}" placeholder="国家或城市，例如：澳大利亚·墨尔本" aria-describedby="city-planner-help${cityPlannerError ? ' city-planner-error' : ''}" aria-invalid="${Boolean(cityPlannerError)}"><button class="button button--secondary" data-action="plan-city" ${cityPlannerBusy || locationGroundingBusy ? 'disabled' : ''}>${cityPlannerBusy ? '正在补全文字规则…' : '添加城市'}</button></div>${cityPlannerError ? `<p id="city-planner-error" class="field-error" role="alert">${escapeHtml(cityPlannerError)}</p>` : ''}<p id="city-planner-help">首次自动检索会要求输入已启用 Maps Grounding Lite API 的 Google Maps Platform Key。密钥仅保存在当前标签页。</p></div>${locationGroundingError ? `<p class="field-error location-grounding-error" role="alert">${escapeHtml(locationGroundingError)}</p>` : ''}<div class="option-editor-list">${optionCards}</div><div class="modal-actions"><span class="selection-count ${missing.length ? 'has-warning' : ''}">${selected.length ? `${selected.length - missing.length}/${selected.length} 个已选地点已自动匹配${missing.length ? ` · 待检索 ${missing.length} 个` : ''}` : '请至少选择一个地点'}</span>${missing.length ? `<button class="button button--secondary" data-action="ground-selected-locations" ${locationGroundingBusy ? 'disabled' : ''}>${locationGroundingBusy ? '正在自动检索…' : '自动匹配全部已选地点'}</button>` : ''}<button class="button button--primary" data-action="finish-prompt-editor" ${locationGroundingBusy ? 'disabled' : ''}>完成</button></div></section></div>`;
 }
 
 async function enrichCity(label) {
@@ -676,29 +735,82 @@ async function enrichCity(label) {
   cityPlannerError = '';
   if (!cityDraft || cityDraft.length > 80) { cityPlannerError = '请输入 1–80 字的国家或城市名称。'; render(); requestAnimationFrame(() => $('#city-name')?.focus()); return; }
   label = cityDraft;
-  const provider = state.studio.provider;
   let group = state.promptGroups.find((item) => item.id === 'group-location');
   if (!group) { group = structuredClone(CORE_PROMPT_GROUPS['group-location']); state.promptGroups.push(group); }
   label = label.trim();
   let option = group.options.find((item) => item.id === label.toLowerCase() || item.label === label || item.label.includes(label) || item.label.toLowerCase().includes(label.toLowerCase()));
-  if (!option?.prompt || option.prompt === option.label) {
-    if (!getProviderApiKey(provider)) { openApiKeyDialog(provider, `city:${label}`); return; }
-    cityPlannerBusy = true;
-    render();
-    try {
-      const output = await apiJson(`/api/${provider}/plan-city`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city: label }) });
-      if (option) Object.assign(option, { prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验' });
-      else { option = { id: uid('city'), label, prompt: output.prompt, description: 'AI 推荐地域线索 · 未联网核验', selected: true, quantity: 1 }; group.options.push(option); }
-    } catch (error) { cityPlannerError = `${error.message}。已保留城市输入和原有选项，可重试。`; return; }
-    finally { cityPlannerBusy = false; render(); }
+  if (!option) {
+    option = { id: uid('city'), label, prompt: `地点锁定为${label}。请根据本张成片文案自动检索当地最相符、可识别且空间合理的真实地点，以 Google Maps 检索摘要作为场景依据。`, description: '自定义城市 · 由 Google Maps 自动匹配', selected: true, quantity: 1 };
+    group.options.push(option);
   }
   group.enabled = true;
   option.selected = true;
   markRecipeCustomized();
   cityDraft = '';
-  regionPreviewId = option.id;
   saveState(); render();
-  showToast('城市已加入当地背景', `${option.label} 已选中，其他城市与数量保持不变；可展开查看背景规则。`, 'check');
+  showToast('城市已加入当地背景', `${option.label} 已选中，正在按当前场景文案准备地图检索。`, 'check');
+  if (!locationGroundingIsFresh(option)) await groundLocationOptions([option], `ground:${option.id}`);
+}
+
+function openMapsKeyDialog(action = '') {
+  rememberFocus();
+  pendingMapsAction = action;
+  mapsKeyDialogError = '';
+  mapsKeyDialogOpen = true;
+  render();
+  requestAnimationFrame(() => $('#google-maps-api-key')?.focus());
+}
+
+async function groundLocationOptions(options, resumeAction = '') {
+  const targets = (options || []).filter(Boolean);
+  if (!targets.length || locationGroundingBusy) return targets.length === 0;
+  if (!getGoogleMapsApiKey()) { openMapsKeyDialog(resumeAction || `ground:${targets.map((item) => item.id).join(',')}`); return false; }
+  locationGroundingBusy = true;
+  locationGroundingError = '';
+  render();
+  let completed = 0;
+  try {
+    for (const option of targets) {
+      const requestFingerprint = locationSearchFingerprint(option);
+      const output = await apiJson('/api/maps/ground-scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': uid('maps') },
+        body: JSON.stringify({ location: option.label, description: option.description || '', copy: locationSearchContext(option) }),
+      });
+      option.sceneGrounding = { ...output.grounding, requestFingerprint };
+      completed += 1;
+    }
+    markRecipeCustomized();
+    if (promptReview) preparePromptReview();
+    saveState();
+    showToast('地图场景已自动匹配', `已完成 ${completed} 个地点检索，检索摘要已加入最终提示词。`, 'check');
+    return true;
+  } catch (error) {
+    if (['MAPS_KEY_INVALID', 'KEY_REQUIRED'].includes(error.code)) {
+      clearGoogleMapsApiKey();
+      mapsKeyDialogOpen = true;
+      mapsKeyDialogError = error.message;
+      pendingMapsAction = resumeAction || `ground:${targets.map((item) => item.id).join(',')}`;
+    }
+    locationGroundingError = `${targets[completed]?.label || '当前地点'}：${error.message}`;
+    showToast('Google Maps 自动检索未完成', `${locationGroundingError}。可在当地背景中重试。`, 'info');
+    return false;
+  } finally {
+    locationGroundingBusy = false;
+    render();
+  }
+}
+
+async function resumeMapsAction(action) {
+  const group = state.promptGroups.find((item) => item.id === 'group-location');
+  if (!group) return;
+  if (action === 'confirm-inline') { await confirmCurrentPromptReview(true); return; }
+  if (action === 'confirm-dialog') { await confirmCurrentPromptReview(false); return; }
+  if (action === 'ground-selected') { await groundLocationOptions(selectedOptions(group), 'ground-selected'); return; }
+  if (action.startsWith('ground:')) {
+    const ids = new Set(action.slice('ground:'.length).split(',').filter(Boolean));
+    await groundLocationOptions(group.options.filter((option) => ids.has(option.id)), action);
+  }
 }
 
 function evaluationOption(value, current, label) { return `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`; }
@@ -732,10 +844,11 @@ function renderResultGroups() {
     return `<section class="result-product-group"><header><div><img src="${escapeHtml(product.image)}" alt=""><span><strong>${escapeHtml(product.sku)}</strong><small>${completed}/${items.length} 已完成${failed ? ` · ${failed} 张需重试` : ''}</small></span></div></header><div class="result-grid">${items.map((item, index) => {
       const label = variantLabel(index);
       const ratio = /^\d+:\d+$/.test(item.ratio || '') ? item.ratio.replace(':', ' / ') : '4 / 3';
+      const mapSource = item.sceneGrounding?.sources?.[0];
       if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 尺寸处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '等待提交' : item.status === 'submitting' ? '正在提交任务' : item.remoteStatus === 'VERIFYING' ? '自动检查人数与互动' : item.remoteStatus === 'REPAIRING' ? '人物未达标 · 自动修复中' : item.remoteStatus === 'PENDING' ? '模型排队中' : item.remoteStatus === 'RETRYING' ? '查询暂时失败 · 自动重试中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
-      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}${mapSource ? `<a class="result-map-source" href="${escapeHtml(mapSource.url)}" target="_blank" rel="noopener noreferrer">Google Maps 场景来源</a>` : ''}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
     }).join('')}</div></section>`;
   }).join('');
 }
@@ -802,7 +915,7 @@ function renderTemplates() {
 
 function renderAssets() {
   const assets = state.savedAssets;
-  return `<section class="page">${pageHeading('素材库', '所有文件以二维图片形式保存，并保留 SKU、组合标签与批次信息。')}<div class="asset-library-grid">${assets.length ? assets.map((asset) => { const product = productById(asset.productId); return `<article class="asset-card"><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product?.name || '产品')}生成素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product?.name || '产品')}生成素材"></button><div class="card-body"><h3>${escapeHtml(product?.sku || '未关联 SKU')}</h3><p>${asset.tags.map(escapeHtml).join(' · ')}</p><div class="card-meta"><span class="tag">${escapeHtml(asset.batchId)}</span><button class="button button--quiet" data-action="download-asset" data-image="${escapeHtml(asset.image)}" data-name="${escapeHtml(product?.sku || '设计素材')}">${svgIcon('download')}下载</button></div></div></article>`; }).join('') : '<div class="empty-state">还没有已保存素材，请先完成一个批量任务。</div>'}</div></section>`;
+  return `<section class="page">${pageHeading('素材库', '所有文件以二维图片形式保存，并保留 SKU、组合标签与批次信息。')}<div class="asset-library-grid">${assets.length ? assets.map((asset) => { const product = productById(asset.productId); const mapSource = asset.sceneGrounding?.sources?.[0]; return `<article class="asset-card"><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product?.name || '产品')}生成素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product?.name || '产品')}生成素材"></button><div class="card-body"><h3>${escapeHtml(product?.sku || '未关联 SKU')}</h3><p>${asset.tags.map(escapeHtml).join(' · ')}</p>${mapSource ? `<a class="asset-map-source" href="${escapeHtml(mapSource.url)}" target="_blank" rel="noopener noreferrer">Google Maps 场景来源</a>` : ''}<div class="card-meta"><span class="tag">${escapeHtml(asset.batchId)}</span><button class="button button--quiet" data-action="download-asset" data-image="${escapeHtml(asset.image)}" data-name="${escapeHtml(product?.sku || '设计素材')}">${svgIcon('download')}下载</button></div></div></article>`; }).join('') : '<div class="empty-state">还没有已保存素材，请先完成一个批量任务。</div>'}</div></section>`;
 }
 
 function exportTargets() {
@@ -832,7 +945,9 @@ function renderConnections() {
     const isActive = state.studio.provider === provider;
     return `<article class="connection-card ${isActive ? 'connection-card--primary' : ''}"><div class="connection-head"><span class="model-avatar ${provider === 'qwen' ? 'model-avatar--qwen' : 'model-avatar--openai'}">${item.avatar}</span><div><h3>${item.name}</h3><p>${escapeHtml(status)}</p></div></div><div class="connection-trust">${svgIcon('check')}仅保存于当前浏览器标签页 · 关闭后自动清除</div><div class="capability-list"><span class="tag">${item.profiles.fast.model}</span><span class="tag">${item.profiles.quality.model}</span><span class="tag">参考图生成</span></div><button class="button ${hasKey ? 'button--secondary' : 'button--primary'}" data-action="authorize-provider" data-provider="${provider}">${hasKey ? '更换或检查密钥' : `输入${item.shortName}密钥`}</button>${hasKey ? `<button class="button button--quiet connection-clear" data-action="clear-provider-key" data-provider="${provider}">清除本标签页密钥</button>` : ''}<button class="text-button connection-use" data-action="set-provider" data-provider="${provider}" ${isActive ? 'disabled' : ''}>${isActive ? '当前生成通道' : '设为生成通道'}</button><p class="connection-note">${provider === 'openai' ? '需要 OpenAI API 平台密钥；ChatGPT 网页会员不等于 API 授权。' : '图片按量计费；结果地址 24 小时有效，请及时下载。'}</p></article>`;
   }).join('');
-  return `<section class="page">${pageHeading('模型连接', 'OpenAI 与千问都可直接连接；密钥仅在当前标签页临时使用。')}<div class="connection-grid connection-grid--models">${providerCards}<article class="connection-card"><div class="connection-head"><span class="model-avatar">临时</span><div><h3>密钥保存方式</h3><p>不写入项目与云端配置</p></div></div><div class="capability-list"><span class="tag">不进 GitHub</span><span class="tag">不存 Cloudflare Secret</span></div><p class="connection-copy">密钥只存在当前标签页的临时会话中，请求时经 HTTPS 交给无状态 Worker 转发到当前选择的模型服务。</p></article></div></section>`;
+  const mapsHasKey = Boolean(getGoogleMapsApiKey());
+  const mapsCard = `<article class="connection-card"><div class="connection-head"><span class="model-avatar model-avatar--maps">G</span><div><h3>Google Maps Grounding Lite</h3><p>${mapsHasKey ? '密钥已输入 · 自动检索时验证' : '首次自动检索时输入密钥'}</p></div></div><div class="connection-trust">${svgIcon('check')}按文案自动检索地点 · 不上传街景截图</div><div class="capability-list"><span class="tag">地点摘要</span><span class="tag">地图来源链接</span><span class="tag">30 天内刷新</span></div><button class="button ${mapsHasKey ? 'button--secondary' : 'button--primary'}" data-action="authorize-maps">${mapsHasKey ? '更换 Google Maps 密钥' : '输入 Google Maps 密钥'}</button>${mapsHasKey ? '<button class="button button--quiet connection-clear" data-action="clear-maps-key">清除本标签页密钥</button>' : ''}<p class="connection-note">需要启用 Maps Grounding Lite API；检索结果会自动写入最终提示词，并保留 Google Maps 来源链接。</p></article>`;
+  return `<section class="page">${pageHeading('模型连接', 'OpenAI、千问与 Google Maps 场景检索都使用当前标签页临时密钥。')}<div class="connection-grid connection-grid--models">${providerCards}${mapsCard}<article class="connection-card"><div class="connection-head"><span class="model-avatar">临时</span><div><h3>密钥保存方式</h3><p>不写入项目与云端配置</p></div></div><div class="capability-list"><span class="tag">不进 GitHub</span><span class="tag">不存 Cloudflare Secret</span></div><p class="connection-copy">密钥只存在当前标签页的临时会话中，请求时经 HTTPS 交给无状态 Worker 转发到对应服务。</p></article></div></section>`;
 }
 
 function renderProductDrawer() {
@@ -842,7 +957,7 @@ function renderProductDrawer() {
   const filterOptions = ['全部', ...new Set(assets.flatMap((asset) => asset.tags))];
   const filtered = state.ui.assetFilter === '全部' ? assets : assets.filter((asset) => asset.tags.includes(state.ui.assetFilter));
   const info = `<div class="drawer-info"><div class="base-image-stage"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}真实白底图"><span>${svgIcon('check')}真实产品底图</span></div><dl class="spec-list"><div><dt>SKU</dt><dd>${escapeHtml(product.sku)}</dd></div><div><dt>产品品类</dt><dd>${escapeHtml(product.category)}</dd></div><div><dt>尺寸</dt><dd>${escapeHtml(product.specs.size)}</dd></div><div><dt>面料</dt><dd>${escapeHtml(product.specs.material)}</dd></div><div><dt>颜色</dt><dd>${escapeHtml(product.specs.color)}</dd></div><div><dt>适用范围</dt><dd>${escapeHtml(product.specs.audience)}</dd></div><div><dt>透气结构</dt><dd>${escapeHtml(product.specs.windows)}</dd></div></dl></div>`;
-  const history = `<div class="drawer-assets"><div class="drawer-dashboard"><div><strong>${assets.length}</strong><span>历史素材</span></div><div><strong>${new Set(assets.map((asset) => asset.batchId)).size}</strong><span>生成批次</span></div><div><strong>${product.updated}</strong><span>最近更新</span></div></div><div class="drawer-filter"><label>${svgIcon('filter')}<select id="asset-filter" aria-label="筛选素材标签">${filterOptions.map((item) => `<option ${item === state.ui.assetFilter ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></label><span>${filtered.length} 张结果</span></div><div class="drawer-asset-grid">${filtered.length ? filtered.map((asset) => `<article><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product.name)}素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product.name)}素材"></button><strong>${asset.tags.map(escapeHtml).join(' · ')}</strong><span>${escapeHtml(asset.batchId)} · ${escapeHtml(asset.createdAt)}</span></article>`).join('') : '<div class="empty-inline">当前筛选条件下没有素材。</div>'}</div></div>`;
+  const history = `<div class="drawer-assets"><div class="drawer-dashboard"><div><strong>${assets.length}</strong><span>历史素材</span></div><div><strong>${new Set(assets.map((asset) => asset.batchId)).size}</strong><span>生成批次</span></div><div><strong>${product.updated}</strong><span>最近更新</span></div></div><div class="drawer-filter"><label>${svgIcon('filter')}<select id="asset-filter" aria-label="筛选素材标签">${filterOptions.map((item) => `<option ${item === state.ui.assetFilter ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></label><span>${filtered.length} 张结果</span></div><div class="drawer-asset-grid">${filtered.length ? filtered.map((asset) => `<article><button class="image-preview-button" data-action="preview-asset" data-id="${asset.id}" aria-label="查看${escapeHtml(product.name)}素材大图"><img src="${escapeHtml(asset.image)}" alt="${escapeHtml(product.name)}素材"></button><strong>${asset.tags.map(escapeHtml).join(' · ')}</strong><span>${escapeHtml(asset.batchId)} · ${escapeHtml(asset.createdAt)}</span>${asset.sceneGrounding?.sources?.[0] ? `<a class="asset-map-source" href="${escapeHtml(asset.sceneGrounding.sources[0].url)}" target="_blank" rel="noopener noreferrer">Google Maps 场景来源</a>` : ''}</article>`).join('') : '<div class="empty-inline">当前筛选条件下没有素材。</div>'}</div></div>`;
   return `<div class="drawer-backdrop" data-action="close-overlay"><aside class="product-drawer overlay-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-header"><div><span>${escapeHtml(product.sku)}</span><h2 id="drawer-title">${escapeHtml(product.name)}</h2></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭产品详情">${svgIcon('x')}</button></header><div class="drawer-tabs" role="tablist" aria-label="产品详情"><button role="tab" aria-selected="${state.ui.drawerTab === 'info'}" data-action="set-drawer-tab" data-tab="info">产品信息</button><button role="tab" aria-selected="${state.ui.drawerTab === 'assets'}" data-action="set-drawer-tab" data-tab="assets">已生成素材 <span>${assets.length}</span></button></div><div class="drawer-body">${state.ui.drawerTab === 'info' ? info : history}</div><footer class="drawer-footer"><button class="button button--secondary" data-action="set-drawer-tab" data-tab="assets">查看历史素材</button><button class="button button--primary" data-action="drawer-generate" data-id="${product.id}">${svgIcon('sparkles')}用此产品生成素材</button></footer></aside></div>`;
 }
 
@@ -881,7 +996,7 @@ function renderPromptDialog() {
 function renderRegionPreview() {
   const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === regionPreviewId);
   if (!option) return '';
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel region-reference" role="dialog" aria-modal="true" aria-labelledby="region-reference-title"><div class="modal-header"><div><h2 id="region-reference-title">${escapeHtml(option.label)} · 背景提示词</h2><p>地标、建筑与景观线索供参考，可直接修改。最终预览会包含当前配方对应地区的这些内容。</p></div><button class="icon-button overlay-close" data-action="back-regions" aria-label="返回地区选择">${svgIcon('x')}</button></div><div class="location-rule"><label for="region-${escapeHtml(option.id)}">地区地标与背景规则</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></div><p class="confirm-note">${option.description?.includes('AI') ? 'AI 推荐未经联网核验。' : '内置地区参考规则。'}白底模板不使用城市背景；其他模板按各自场景要求选择地标或住宅线索。</p><div class="modal-actions"><button class="button button--primary" data-action="back-regions">确认地区提示词</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel region-reference" role="dialog" aria-modal="true" aria-labelledby="region-reference-title"><div class="modal-header"><div><h2 id="region-reference-title">${escapeHtml(option.label)} · 背景要求</h2><p>这里描述希望出现的场景与氛围。确认最终提示词时，系统会据此自动检索 Google Maps 并补充真实地点线索。</p></div><button class="icon-button overlay-close" data-action="back-regions" aria-label="返回地区选择">${svgIcon('x')}</button></div><div class="location-rule"><label for="region-${escapeHtml(option.id)}">场景检索要求</label><textarea id="region-${escapeHtml(option.id)}" data-region-prompt="${escapeHtml(option.id)}" maxlength="1600">${escapeHtml(option.prompt || option.label)}</textarea></div><p class="confirm-note">修改要求会使当前地图匹配失效，下次确认时自动重新检索。白底模板不使用城市背景；其他模板会保留 Google Maps 来源链接。</p><div class="modal-actions"><button class="button button--primary" data-action="back-regions">确认背景要求</button></div></section></div>`;
 }
 
 function reviewFingerprint(forComparison = comparisonRequested) {
@@ -926,15 +1041,17 @@ function validatePromptReview(inline = false) {
   render(); $('#final-prompt-text')?.focus(); return false;
 }
 
-function confirmCurrentPromptReview(inline = false) {
+async function confirmCurrentPromptReview(inline = false) {
   if ((!inline && promptReviewEditing) || !promptReview) return;
   const missingEvidence = selectedLocationsMissingEvidence();
   if (missingEvidence.length) {
-    promptReviewError = `请先为 ${missingEvidence.map((option) => option.label).join('、')} 上传 Google Maps 实景截图；尚未提交或扣分。`;
-    if (!inline) state.ui.confirmBatch = false;
-    state.ui.promptDialogGroupId = 'group-location';
-    render(); focusOverlay();
-    showToast('当地实景尚未核验', `还缺 ${missingEvidence.length} 个已选地点的实景截图。`);
+    const resolved = await groundLocationOptions(missingEvidence, inline ? 'confirm-inline' : 'confirm-dialog');
+    if (resolved) {
+      preparePromptReview();
+      promptReviewError = 'Google Maps 检索依据已更新到最终提示词，请检查后再次确认；尚未提交或扣分。';
+      if (!inline) state.ui.confirmBatch = true;
+      render(); requestAnimationFrame(() => $('#final-prompt-text')?.focus());
+    }
     return;
   }
   if (promptReview.fingerprint !== reviewFingerprint()) { preparePromptReview(); render(); showToast('选项已变更', '请重新检查并确认提示词。'); return; }
@@ -984,8 +1101,8 @@ function renderInlineFinalPrompt(batchRunning) {
   if (!entry) return '<p class="final-prompt-empty">当前没有可确认的提示词配方。</p>';
   const confirmed = hasConfirmedPromptReview(false);
   const missingEvidence = selectedLocationsMissingEvidence();
-  const evidenceGate = locationEvidenceRequired() ? `<div class="scene-evidence-gate ${missingEvidence.length ? 'is-blocked' : 'is-ready'}"><div><strong>${missingEvidence.length ? '生成前还缺真实场景依据' : 'Google Maps 实景依据已就绪'}</strong><p>${missingEvidence.length ? `请为 ${missingEvidence.map((option) => option.label).join('、')} 上传街景截图。系统不会只凭文字猜测当地场景。` : '生成时图1锁定帐篷，图2锁定对应地点的真实建筑、道路、植被、光线和透视。'}</p></div><button class="button button--secondary" data-action="edit-prompt-group" data-id="group-location">${missingEvidence.length ? '去核验实景' : '查看实景依据'}</button></div>` : '';
-  return `<div class="inline-final-prompt"><div class="final-prompt-heading"><div><h4 id="final-prompt-title">最终提示词</h4><p>汇总上方所有选项和要求。可切换检查每个产品与配方，并直接修改最终内容。</p></div><span class="final-prompt-badge ${confirmed ? 'is-confirmed' : ''}" data-inline-prompt-badge>${confirmed ? '已确认' : '待确认'}</span></div>${evidenceGate}<label for="prompt-review-entry">当前配方</label><select id="prompt-review-entry" class="select-control" ${batchRunning ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p><label for="final-prompt-text">最终提示词 · 可直接修改</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), entry.prompt.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}" aria-invalid="${promptReviewError ? 'true' : 'false'}" ${batchRunning ? 'disabled' : ''}>${escapeHtml(entry.prompt)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<p id="prompt-review-help">修改只作用于当前配方；切换后可逐一检查。确认不会调用生图或扣分，当前模型上限为 ${promptReviewLimit()} 字。</p><div class="inline-prompt-confirm"><p data-inline-prompt-status role="status">${missingEvidence.length ? `请先补齐 ${missingEvidence.length} 个地点实景，再确认提示词。` : promptConfirmationText(false)}</p><button class="button button--primary" data-action="confirm-inline-prompts" ${batchRunning || generationStarting || missingEvidence.length ? 'disabled' : ''}>${svgIcon('check')}确认最终提示词</button></div></div>`;
+  const evidenceGate = locationEvidenceRequired() ? `<div class="scene-evidence-gate ${missingEvidence.length ? 'is-blocked' : 'is-ready'}"><div><strong>${missingEvidence.length ? '确认时将自动检索地图场景' : 'Google Maps 检索依据已就绪'}</strong><p>${missingEvidence.length ? `系统会按当前文案自动匹配 ${missingEvidence.map((option) => option.label).join('、')} 的相符地点，无需上传截图。` : '最终提示词已包含地图检索摘要；生成模型只接收产品参考图，不接收 Street View 截图。'}</p></div><button class="button button--secondary" data-action="${missingEvidence.length ? 'ground-selected-locations' : 'edit-prompt-group'}" ${missingEvidence.length ? '' : 'data-id="group-location"'}>${missingEvidence.length ? '立即自动检索' : '查看地图依据'}</button></div>` : '';
+  return `<div class="inline-final-prompt"><div class="final-prompt-heading"><div><h4 id="final-prompt-title">最终提示词</h4><p>汇总上方所有选项和要求。可切换检查每个产品与配方，并直接修改最终内容。</p></div><span class="final-prompt-badge ${confirmed ? 'is-confirmed' : ''}" data-inline-prompt-badge>${confirmed ? '已确认' : '待确认'}</span></div>${evidenceGate}<label for="prompt-review-entry">当前配方</label><select id="prompt-review-entry" class="select-control" ${batchRunning ? 'disabled' : ''}>${promptReview.entries.map((item, index) => `<option value="${index}" ${index === promptReviewIndex ? 'selected' : ''}>${index + 1}. ${escapeHtml(item.label)}</option>`).join('')}</select><p class="review-current-recipe">${escapeHtml(entry.label)}</p><label for="final-prompt-text">最终提示词 · 可直接修改</label><textarea id="final-prompt-text" maxlength="${Math.max(promptReviewLimit(), entry.prompt.length)}" aria-describedby="prompt-review-help${promptReviewError ? ' prompt-review-error' : ''}" aria-invalid="${promptReviewError ? 'true' : 'false'}" ${batchRunning ? 'disabled' : ''}>${escapeHtml(entry.prompt)}</textarea>${promptReviewError ? `<p id="prompt-review-error" class="field-error" role="alert">${escapeHtml(promptReviewError)}</p>` : ''}<p id="prompt-review-help">修改只作用于当前配方；切换后可逐一检查。确认不会调用生图或扣分，当前模型上限为 ${promptReviewLimit()} 字。</p><div class="inline-prompt-confirm"><p data-inline-prompt-status role="status">${missingEvidence.length ? `点击确认后将先自动检索 ${missingEvidence.length} 个地点，再刷新最终提示词。` : promptConfirmationText(false)}</p><button class="button button--primary" data-action="confirm-inline-prompts" ${batchRunning || generationStarting || locationGroundingBusy ? 'disabled' : ''}>${svgIcon('check')}${missingEvidence.length ? '自动检索并刷新提示词' : '确认最终提示词'}</button></div></div>`;
 }
 
 function reviewedPrompt(product, combo, comboIndex) {
@@ -1006,13 +1123,18 @@ function renderConfirmDialog() {
   const profile = comparisonRequested ? { name: '同配方模型配置对比', model: Object.values(providerConfig().profiles).map((item) => item.model).join(' / ') } : generationProfile();
   const provider = providerConfig();
   const missingEvidence = selectedLocationsMissingEvidence();
-  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${missingEvidence.length ? `<div class="scene-evidence-gate is-blocked"><div><strong>还不能确认：缺少 Google Maps 实景</strong><p>${escapeHtml(missingEvidence.map((option) => option.label).join('、'))} 尚未上传街景截图。</p></div><button class="button button--secondary" data-action="edit-prompt-group" data-id="group-location">去核验实景</button></div>` : ''}${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；${state.studio.provider === 'qwen' ? '含人物约束的千问图片会追加一次视觉验收，不合格时自动修复一次；视觉验收和修复由千问按实际调用计费，但不另扣软件积分。' : ''}同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing || missingEvidence.length ? 'disabled' : ''}>${svgIcon('check')}确认提示词</button></div></section></div>`;
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">确认提示词 · ${provider.shortName} / ${total} 张素材</h2><p>${comparisonRequested ? '只取首个 SKU 和首个提示词组合，每个模型配置生成一张，结果记录具体型号。' : '系统会以每个 SKU 的产品图为参考，按提示词组合创建真实付费任务。'}本次仅确认提示词，不调用生图、不扣分。确认后返回工作台点击生成，首次生成时再输入对应密钥。</p>${missingEvidence.length ? `<div class="scene-evidence-gate is-blocked"><div><strong>确认前将自动检索 Google Maps 场景</strong><p>系统会按当前文案匹配 ${escapeHtml(missingEvidence.map((option) => option.label).join('、'))} 的相符地点，无需手动绑定实景。</p></div><button class="button button--secondary" data-action="ground-selected-locations">立即自动检索</button></div>` : ''}${renderPromptReview()}<details class="generation-summary" open><summary>生成计划与费用 · ${total} 张 / ${batchCost()} 积分</summary><div class="confirm-summary"><div><span>通道</span><strong>${provider.name}</strong></div><div><span>模式</span><strong>${profile.name}</strong></div><div><span>模型</span><strong>${escapeHtml(profile.model)}</strong></div><div><span>产品</span><strong>${(comparisonRequested ? selectedProducts().slice(0, 1) : selectedProducts()).map((product) => escapeHtml(product.sku)).join('、')}</strong></div><div><span>组合公式</span><strong>${escapeHtml(formulaText())}</strong></div><div><span>平台积分</span><strong>${batchCost()} 积分</strong></div><div><span>模型计费</span><strong>由对应 API 平台按实际请求结算</strong></div><div><span>预计耗时</span><strong>${estimatedDuration(total)}</strong></div></div></details><p class="confirm-note">实际耗时受模型服务实时负载影响；${state.studio.provider === 'qwen' ? '含人物约束的千问图片会追加一次视觉验收，不合格时自动修复一次；视觉验收和修复由千问按实际调用计费，但不另扣软件积分。' : ''}同配方对比包含模型、质量和扩写配置差异，不等同于仅替换模型的严格实验。</p><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">返回修改</button><button class="button button--primary" data-action="confirm-prompts" ${generationStarting || promptReviewEditing || locationGroundingBusy ? 'disabled' : ''}>${svgIcon('check')}${missingEvidence.length ? '自动检索并刷新提示词' : '确认提示词'}</button></div></section></div>`;
 }
 
 function renderApiKeyDialog() {
   if (!keyDialogOpen) return '';
   const provider = providerConfig(keyDialogProvider);
   return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-dialog-title" aria-describedby="key-dialog-help"><div class="modal-header"><div><h2 id="key-dialog-title">输入${provider.keyLabel}</h2><p id="key-dialog-help">支持 sk- 开头的完整密钥，仅用于当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="provider-api-key"><span>API Key</span><input id="provider-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整的 sk- 开头密钥" value="${escapeHtml(getProviderApiKey(keyDialogProvider))}"></label>${keyDialogError ? `<p class="field-error" role="alert">${escapeHtml(keyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div>${keyDialogProvider === 'openai' ? '<p class="key-help">请使用 OpenAI API 平台创建的密钥；ChatGPT 登录或会员本身不能作为 API Key。</p>' : ''}<div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">取消</button><button class="button button--primary" data-action="save-provider-key">验证并使用</button></div></section></div>`;
+}
+
+function renderMapsKeyDialog() {
+  if (!mapsKeyDialogOpen) return '';
+  return `<div class="modal-backdrop dynamic-overlay"><section class="modal overlay-panel key-dialog" role="dialog" aria-modal="true" aria-labelledby="maps-key-dialog-title" aria-describedby="maps-key-dialog-help"><div class="modal-header"><div><h2 id="maps-key-dialog-title">输入 Google Maps Platform API Key</h2><p id="maps-key-dialog-help">用于 Maps Grounding Lite 自动检索地点，仅保存在当前浏览器标签页。</p></div><button class="icon-button overlay-close" data-action="close-maps-key-dialog" aria-label="关闭 Google Maps 密钥输入窗口">${svgIcon('x')}</button></div><label class="key-field" for="google-maps-api-key"><span>Google Maps API Key</span><input id="google-maps-api-key" class="input-control" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴 AIza 开头的完整密钥" value="${escapeHtml(getGoogleMapsApiKey())}"></label>${mapsKeyDialogError ? `<p class="field-error" role="alert">${escapeHtml(mapsKeyDialogError)}</p>` : ''}<div class="key-privacy">${svgIcon('check')}不会写入 GitHub、Cloudflare Secret 或应用长期状态；关闭标签页后自动清除。</div><p class="key-help">该密钥需要在 Google Cloud 中启用 Maps Grounding Lite API。系统只使用官方地点检索摘要与来源链接，不下载或传输 Street View 截图。</p><div class="modal-actions"><a class="button button--quiet" href="https://console.cloud.google.com/apis/library/mapstools.googleapis.com" target="_blank" rel="noopener noreferrer">打开 Google Cloud</a><button class="button button--secondary" data-action="close-maps-key-dialog">取消</button><button class="button button--primary" data-action="save-maps-key">保存并自动检索</button></div></section></div>`;
 }
 
 function renderImagePreview() {
@@ -1022,7 +1144,7 @@ function renderImagePreview() {
 
 function renderOverlays() {
   const root = $('#overlay-root');
-  root.innerHTML = renderImagePreview() || renderApiKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
+  root.innerHTML = renderImagePreview() || renderMapsKeyDialog() || renderApiKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
   document.body.classList.toggle('overlay-open', Boolean(root.innerHTML) || !$('#import-modal').hidden);
   hydrateIcons(root);
 }
@@ -1044,6 +1166,9 @@ function closeOverlay() {
   keyDialogOpen = false;
   keyDialogError = '';
   pendingKeyAction = '';
+  mapsKeyDialogOpen = false;
+  mapsKeyDialogError = '';
+  pendingMapsAction = '';
   state.ui.drawerProductId = '';
   state.ui.productPickerOpen = false;
   state.ui.promptDialogGroupId = '';
@@ -1133,6 +1258,15 @@ async function apiJson(path, options = {}) {
       throw error;
     }
     headers.set('X-OpenAI-Api-Key', apiKey);
+  }
+  if (path.startsWith('/api/maps/')) {
+    const apiKey = getGoogleMapsApiKey();
+    if (!apiKey) {
+      const error = new Error('请先输入 Google Maps Platform API Key。');
+      error.code = 'KEY_REQUIRED';
+      throw error;
+    }
+    headers.set('X-Google-Maps-Api-Key', apiKey);
   }
   let response;
   try {
@@ -1325,12 +1459,18 @@ async function referenceImageForModel(product) {
 
 async function referenceImagesForResult(result, product) {
   const productReference = await referenceImageForModel(product);
-  if (!result.sceneReferenceId) return [productReference];
-  const sceneReference = state.batch.sceneReferences?.[result.sceneReferenceId];
-  if (!sceneReference?.image) throw new Error('对应地点的 Google Maps 实景截图已丢失，请返回当地背景重新上传后生成。');
-  const combinedLength = productReference.length + sceneReference.image.length;
-  if (combinedLength > 11_000_000) throw new Error('产品图与街景截图合计过大，请压缩街景截图后重新上传。');
-  return [productReference, sceneReference.image];
+  return [productReference];
+}
+
+function sceneGroundingForRequest(result) {
+  if (!result.sceneGrounding) return null;
+  return {
+    verified: true,
+    summary: result.sceneGrounding.summary,
+    sources: (result.sceneGrounding.sources || []).map(({ title, url, placeId }) => ({ title, url, placeId })),
+    resolvedAt: result.sceneGrounding.resolvedAt,
+    expiresAt: result.sceneGrounding.expiresAt,
+  };
 }
 
 async function submitQwenResult(result) {
@@ -1346,7 +1486,7 @@ async function submitQwenResult(result) {
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
-    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneReferenceAttached: Boolean(result.sceneReferenceId), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneGrounding: sceneGroundingForRequest(result), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.taskId = task.taskId;
   result.model = task.model;
@@ -1367,7 +1507,7 @@ async function submitOpenAiResult(result) {
   const output = await apiJson('/api/openai/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
-    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneReferenceAttached: Boolean(result.sceneReferenceId), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
+    body: JSON.stringify({ requestId: result.requestId, prompt: result.prompt || generationPrompt(product, result.tags, result.promptDetails, result.ratio), referenceImages, sceneGrounding: sceneGroundingForRequest(result), ratio: result.ratio || state.studio.ratio, generationMode: result.generationMode || state.studio.generationMode }),
   });
   result.image = output.imageUrl;
   result.model = output.model;
@@ -1529,7 +1669,7 @@ async function startBatchGeneration() {
   if (generationStarting || promptReviewEditing || state.batch.status === 'generating' || activeGenerationId) return;
   const requestedComparison = comparisonRequested;
   const missingEvidence = selectedLocationsMissingEvidence();
-  if (missingEvidence.length) { syncPromptConfirmationControls(); showToast('请先核验当地实景', `还缺 ${missingEvidence.map((option) => option.label).join('、')} 的 Google Maps 街景截图，尚未提交或扣分。`); return; }
+  if (missingEvidence.length) { syncPromptConfirmationControls(); showToast('地图场景依据已变化', `请重新确认最终提示词；系统会自动检索 ${missingEvidence.map((option) => option.label).join('、')}。尚未提交或扣分。`); return; }
   if (!hasConfirmedPromptReview(requestedComparison)) { syncPromptConfirmationControls(); showToast('请先确认最终提示词', '请在上方“最终提示词”区域检查并确认后再生成。'); return; }
   const approvedReview = confirmedPromptReviews[requestedComparison ? 'comparison' : 'batch'];
   promptReview = structuredClone(approvedReview);
@@ -1553,17 +1693,12 @@ async function startBatchGeneration() {
   const generationMode = providerConfig(provider).profiles[state.studio.generationMode] ? state.studio.generationMode : 'fast';
   const products = isComparison ? selectedProducts().slice(0, 1) : selectedProducts();
   const modes = isComparison ? Object.keys(providerConfig(provider).profiles) : [generationMode];
-  const locationGroup = state.promptGroups.find((group) => group.id === 'group-location');
-  const sceneReferences = Object.fromEntries([...new Set(combinations.map((combo) => combo.sceneReferenceId).filter(Boolean))].map((id) => {
-    const option = locationGroup?.options.find((item) => item.id === id);
-    return [id, { image: option?.sceneReferenceImage || '', name: option?.sceneReferenceName || '', label: option?.label || id }];
-  }));
-  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, sceneReferenceId: combo.sceneReferenceId || '', provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false, autoRepairAttempts: 0, qualityCheck: null }))));
+  const results = products.flatMap((product, productIndex) => combinations.flatMap((combo, comboIndex) => modes.map((mode) => ({ id: uid(`result-${productIndex}-${comboIndex}`), requestId: uid('request'), productId: product.id, productSnapshot: structuredClone(product), prompt: reviewedPrompt(product, combo, comboIndex), ratio: combo.ratio || state.studio.ratio, image: '', tags: isComparison ? [...combo.tags, `模型：${providerConfig(provider).profiles[mode].model}`] : combo.tags, promptDetails: combo.promptDetails, sceneGroundingId: combo.sceneGroundingId || '', sceneGrounding: combo.sceneGrounding ? structuredClone(combo.sceneGrounding) : null, provider, generationMode: mode, model: providerConfig(provider).profiles[mode].code, evaluation: Core.emptyEvaluation(), review: 'pending', status: 'queued', taskId: '', submittedAt: 0, remoteStatus: '', error: '', saved: false, creditRefunded: false, autoRepairAttempts: 0, qualityCheck: null }))));
   if (state.batch.results.length) state.batchHistory.unshift(structuredClone(state.batch));
   confirmedPromptReviews[isComparison ? 'comparison' : 'batch'] = null;
   comparisonRequested = false;
   state.credits -= cost;
-  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, sceneReferences, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
+  state.batch = { id: `B-${Date.now()}`, status: 'generating', comparison: isComparison, provider, generationMode, results, plannedTotal: total, startedAt: nowLabel(), startedAtMs: Date.now(), finishedAtMs: 0, nextSubmissionAt: 0, submissionComplete: provider !== 'qwen', savedAt: '' };
   activeGenerationId = state.batch.id;
   state.ui.confirmBatch = false;
   state.ui.batchAuditOpen = false;
@@ -1753,22 +1888,14 @@ document.addEventListener('click', async (event) => {
   if (!button) return;
   const action = button.dataset.action;
   if (action === 'back-styles') { stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay(); return; }
-  if (action === 'preview-location-reference') {
+  if (action === 'ground-location') {
     const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === button.dataset.id);
-    if (option?.sceneReferenceImage) {
-      rememberFocus();
-      imagePreview = { image: option.sceneReferenceImage, title: `${option.label} · 实景参考`, meta: `${option.sceneReferenceName || 'Google Maps 街景截图'} · 仅作为场景事实依据`, downloadName: `${option.label}-实景参考` };
-      render(); focusOverlay();
-    }
+    if (option) { option.selected = true; await groundLocationOptions([option], `ground:${option.id}`); }
     return;
   }
-  if (action === 'remove-location-reference') {
-    const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === button.dataset.id);
-    if (option) {
-      delete option.sceneReferenceImage; delete option.sceneReferenceName; delete option.sceneReferenceUpdatedAt;
-      markRecipeCustomized(); saveState(); render(); focusOverlay();
-      showToast('实景截图已移除', `${option.label} 需要重新核验后才能生成。`);
-    }
+  if (action === 'ground-selected-locations') {
+    const group = state.promptGroups.find((item) => item.id === 'group-location');
+    await groundLocationOptions(selectedLocationsMissingEvidence().length ? selectedLocationsMissingEvidence() : selectedOptions(group), 'ground-selected');
     return;
   }
   if (action === 'save-style-prompt') { saveStylePrompt(); return; }
@@ -1878,10 +2005,10 @@ document.addEventListener('click', async (event) => {
     comparisonRequested = false;
     promptReviewEditing = false;
     promptReviewDraft = '';
-    confirmCurrentPromptReview(true);
+    await confirmCurrentPromptReview(true);
     return;
   }
-  if (action === 'confirm-prompts') confirmCurrentPromptReview();
+  if (action === 'confirm-prompts') await confirmCurrentPromptReview();
   if (action === 'generate-batch' || action === 'generate-comparison') {
     comparisonRequested = action === 'generate-comparison';
     await startBatchGeneration();
@@ -1908,6 +2035,33 @@ document.addEventListener('click', async (event) => {
     clearProviderApiKey(provider);
     saveState(); render();
     showToast(`${providerConfig(provider).shortName}密钥已清除`, '下次使用该模型时会重新弹出输入窗口。', 'check');
+  }
+  if (action === 'authorize-maps') openMapsKeyDialog('ground-selected');
+  if (action === 'clear-maps-key') {
+    clearGoogleMapsApiKey();
+    render();
+    showToast('Google Maps 密钥已清除', '下次自动检索地点时会重新弹出输入窗口。', 'check');
+  }
+  if (action === 'close-maps-key-dialog') {
+    mapsKeyDialogOpen = false; mapsKeyDialogError = ''; pendingMapsAction = ''; render(); focusOverlay(); return;
+  }
+  if (action === 'save-maps-key') {
+    const input = $('#google-maps-api-key');
+    const apiKey = normalizeApiKey(input?.value);
+    if (!isGoogleMapsApiKey(apiKey)) {
+      mapsKeyDialogError = '请输入完整的 Google Maps Platform API Key，通常以 AIza 开头。';
+      render(); requestAnimationFrame(() => $('#google-maps-api-key')?.focus()); return;
+    }
+    if (!setGoogleMapsApiKey(apiKey)) {
+      mapsKeyDialogError = '浏览器禁止了标签页临时存储，请关闭隐私限制后重试。';
+      render(); return;
+    }
+    const nextAction = pendingMapsAction;
+    mapsKeyDialogOpen = false; mapsKeyDialogError = ''; pendingMapsAction = '';
+    render();
+    if (nextAction) await resumeMapsAction(nextAction);
+    else showToast('Google Maps 密钥已保存', '将在首次自动检索时验证 Maps Grounding Lite 权限。', 'check');
+    return;
   }
   if (action === 'save-provider-key') {
     const provider = keyDialogProvider;
@@ -1969,29 +2123,6 @@ document.addEventListener('input', (event) => {
 });
 
 document.addEventListener('change', (event) => {
-  if (event.target.dataset?.sceneReference) {
-    const file = event.target.files?.[0];
-    const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === event.target.dataset.sceneReference);
-    if (!file || !option) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('图片格式不支持', '请上传 PNG、JPG 或 WebP 格式的街景截图。'); return; }
-    if (file.size > 4 * 1024 * 1024) { showToast('街景截图过大', '请将图片压缩到 4MB 以内再上传，避免两张参考图超过模型限制。'); return; }
-    const reader = new FileReader();
-    reader.onerror = () => showToast('街景截图读取失败', '请重新选择图片，原有实景依据不会被覆盖。');
-    reader.onload = () => {
-      const value = String(reader.result || '');
-      if (!value.startsWith('data:image/')) { showToast('街景截图无效', '请重新导出并上传有效的图片文件。'); return; }
-      option.sceneReferenceImage = value;
-      option.sceneReferenceName = file.name;
-      option.sceneReferenceUpdatedAt = new Date().toISOString();
-      option.selected = true;
-      const group = state.promptGroups.find((item) => item.id === 'group-location');
-      if (group) group.enabled = true;
-      markRecipeCustomized(); saveState(); render(); focusOverlay();
-      showToast('实景依据已绑定', `${option.label} 生成时将使用产品图 + 街景截图两张参考图。`, 'check');
-    };
-    reader.readAsDataURL(file);
-    return;
-  }
   if (event.target.id === 'prompt-review-entry' && !promptReviewEditing) { const index = Number(event.target.value); if (Number.isInteger(index) && promptReview?.entries[index]) { promptReviewIndex = index; promptReviewError = ''; render(); $('#prompt-review-entry')?.focus(); } return; }
   if (event.target.id === 'studio-provider') { setStudioProvider(event.target.value); return; }
   if (event.target.id === 'studio-quality') { setStudioQuality(event.target.value); return; }

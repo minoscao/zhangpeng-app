@@ -60,29 +60,29 @@
   }
 
   function buildCombinations(state) {
-    let combinations = [{ tags: [], promptDetails: [], ratio: state.studio.ratio, sceneReferenceId: '', sceneReferenceName: '', sceneReferenceVersion: '', sceneReferenceReady: false }];
+    let combinations = [{ tags: [], promptDetails: [], ratio: state.studio.ratio, sceneGroundingId: '', sceneGroundingVersion: '', sceneGroundingReady: false, sceneGrounding: null }];
     enabledGroups(state).forEach((group) => {
       const expanded = selectedOptions(group).flatMap((option) => Array.from({ length: option.quantity }, (_, index) => ({
         label: option.quantity > 1 ? `${option.label} · 变体 ${index + 1}/${option.quantity}` : option.label,
         prompt: [option.prompt || option.label, variantDirection(index, option.quantity)].filter(Boolean).join('；'),
         ratio: option.ratio,
-        sceneReferenceId: group.id === 'group-location' ? option.id : '',
-        sceneReferenceName: group.id === 'group-location' ? (option.sceneReferenceName || '') : '',
-        sceneReferenceVersion: group.id === 'group-location' ? (option.sceneReferenceUpdatedAt || '') : '',
-        sceneReferenceReady: group.id === 'group-location' ? Boolean(option.sceneReferenceImage) : false,
+        sceneGroundingId: group.id === 'group-location' ? option.id : '',
+        sceneGroundingVersion: group.id === 'group-location' ? (option.sceneGrounding?.resolvedAt || '') : '',
+        sceneGroundingReady: group.id === 'group-location' ? Boolean(option.sceneGrounding?.summary && option.sceneGrounding?.sources?.length) : false,
+        sceneGrounding: group.id === 'group-location' ? (option.sceneGrounding || null) : null,
       })));
       combinations = combinations.flatMap((combo) => expanded.map((option) => ({
         tags: [...combo.tags, `${group.name}：${option.label}`],
         promptDetails: [
           ...combo.promptDetails,
           `${group.name}：${option.prompt}`,
-          ...(option.sceneReferenceId ? [`实景参考：${option.sceneReferenceReady ? '已绑定' : '未绑定'}`] : []),
+          ...(option.sceneGroundingId ? [`地图检索依据：${option.sceneGroundingReady ? option.sceneGrounding.summary : '尚未自动检索；必须在生成前完成 Google Maps Grounding Lite 检索。'}`] : []),
         ],
         ratio: option.ratio || combo.ratio,
-        sceneReferenceId: option.sceneReferenceId || combo.sceneReferenceId,
-        sceneReferenceName: option.sceneReferenceId ? option.sceneReferenceName : combo.sceneReferenceName,
-        sceneReferenceVersion: option.sceneReferenceId ? option.sceneReferenceVersion : combo.sceneReferenceVersion,
-        sceneReferenceReady: option.sceneReferenceId ? option.sceneReferenceReady : combo.sceneReferenceReady,
+        sceneGroundingId: option.sceneGroundingId || combo.sceneGroundingId,
+        sceneGroundingVersion: option.sceneGroundingId ? option.sceneGroundingVersion : combo.sceneGroundingVersion,
+        sceneGroundingReady: option.sceneGroundingId ? option.sceneGroundingReady : combo.sceneGroundingReady,
+        sceneGrounding: option.sceneGroundingId ? option.sceneGrounding : combo.sceneGrounding,
       })));
     });
     return combinations;
@@ -112,12 +112,12 @@
         ? '近景只在画面边缘或远景保留一个占画面约 5%–10% 的地域锚点；保持特征可辨，但不把地标放大贴到产品后方。'
         : '背景环境占画面 40%–55%，只保留一个主地域锚点，占画面约 8%–18%，名称对应的关键特征清晰可辨。';
     return [
-      '【地域场景硬约束｜不可省略】图1只锁定帐篷；图2为用户核验的 Google Maps 实景，只锁定真实场地。两图职责不可交换。',
-      `【实景证据】${sceneEvidenceRule || '未绑定 Google Maps 实景截图；必须停止生成并先补充实景参考图。'}`,
-      '必须彻底移除图1旧背景，以图2为实景底稿放入帐篷；保留其建筑、道路、植被、光线和透视，不复制地图界面、标注、车牌、水印、原路人或车辆。',
+      '【地域场景硬约束｜不可省略】参考图只定义帐篷；场景依据来自 Google Maps Grounding Lite 自动检索。',
+      `【Google Maps 检索依据】${sceneEvidenceRule || '尚未自动检索；必须停止生成并先完成地图场景检索。'}`,
+      '移除旧背景，按检索摘要重建连续地面、可信透视与地域特征；禁止地图界面、标注、店名、车牌和水印。',
       `目标地域：${locationRule}。`,
       `可见性验收：${visibility}`,
-      '主地标位于中远景并服从真实透视，不得像贴纸贴在帐篷后方；不得用普通草坪、无名住宅、影棚或背景虚化代替目标地域，也不得出现其他城市地标。室内场景词与户外地域冲突时，以面向地标的露台或庭院解释。',
+      '地标位于中远景且透视真实；不得用通用草坪、无名住宅、影棚或虚化背景替代，不得混入其他城市地标。室内冲突时改为面向地标的露台或庭院。',
     ].join('\n');
   }
 
@@ -171,15 +171,15 @@
     const template = state.publicPrompts.find((item) => item.id === state.studio.publicPromptId) || state.publicPrompts[0];
     const sourceRules = promptDetails.length ? promptDetails : tags;
     const rules = template?.id === 'white' || template?.backgroundMode === 'none'
-      ? sourceRules.filter((tag) => !tag.startsWith('当地背景：') && !tag.startsWith('实景参考：'))
+      ? sourceRules.filter((tag) => !tag.startsWith('当地背景：') && !tag.startsWith('地图检索依据：'))
       : sourceRules;
     const locationRule = ruleValue(rules, '当地背景');
-    const sceneEvidenceRule = ruleValue(rules, '实景参考');
+    const sceneEvidenceRule = ruleValue(rules, '地图检索依据');
     const shotRule = ruleValue(rules, '镜头景别');
     const peopleRule = ruleValue(rules, '出现人数');
     const wideShot = /环境远景|建立镜头/.test(shotRule);
     const combination = rules
-      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('实景参考：') && !rule.startsWith('镜头景别：') && !rule.startsWith('出现人数：'))
+      .filter((rule) => !rule.startsWith('当地背景：') && !rule.startsWith('地图检索依据：') && !rule.startsWith('镜头景别：') && !rule.startsWith('出现人数：'))
       .map((tag) => tag.replace('：', '要求为').replace(/[。；\s]+$/, ''))
       .join('；');
     return [
