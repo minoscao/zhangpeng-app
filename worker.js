@@ -20,6 +20,7 @@ const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const TASK_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{6,128}$/;
 const UPSTREAM_TIMEOUTS = Object.freeze({ validate: 20000, submit: 60000, task: 20000, image: 180000, city: 45000, maps: 30000 });
+const SAFE_RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const SIZE_BY_RATIO = Object.freeze({
   '1:1': '1280*1280',
   '3:4': '960*1280',
@@ -63,8 +64,35 @@ function logEvent(event, details = {}) {
   console.log(JSON.stringify({ event, ...details }));
 }
 
-function fetchUpstream(input, init = {}, timeout = UPSTREAM_TIMEOUTS.task) {
-  return fetch(input, { ...init, signal: AbortSignal.timeout(timeout) });
+function safeErrorDetail(error) {
+  return String(error?.message || error?.name || 'Unknown error')
+    .replace(/sk-[A-Za-z0-9._-]{8,}/g, '[redacted]')
+    .slice(0, 180);
+}
+
+function isTimeoutError(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchUpstream(input, init = {}, timeoutOrOptions = UPSTREAM_TIMEOUTS.task) {
+  const options = typeof timeoutOrOptions === 'number' ? { timeout: timeoutOrOptions } : timeoutOrOptions;
+  const timeout = options.timeout || UPSTREAM_TIMEOUTS.task;
+  const retries = Math.max(0, Math.min(2, Number(options.retries || 0)));
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await fetch(input, { ...init, signal: AbortSignal.timeout(timeout) });
+      if (!SAFE_RETRY_STATUSES.has(response.status) || attempt === retries) return response;
+      await response.body?.cancel().catch(() => {});
+    } catch (error) {
+      if (attempt === retries) throw error;
+    }
+    await wait(300 * (attempt + 1));
+  }
+  throw new Error('UPSTREAM_RETRY_EXHAUSTED');
 }
 
 function responseWithRequestId(response, requestId) {
@@ -293,7 +321,7 @@ async function validateQwenKey(apiKey, env) {
   return jsonResponse({ error: { code, message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 401);
 }
 
-async function createQwenTask(request, env, apiKey) {
+async function createQwenTask(request, env, apiKey, requestId) {
   let body;
   try {
     body = await readJsonBody(request);
@@ -356,19 +384,34 @@ async function createQwenTask(request, env, apiKey) {
     parameters.enable_interleave = false;
     delete parameters.enable_thinking;
   }
-  const upstream = await fetchUpstream(`${env.DASHSCOPE_BASE_URL || DASHSCOPE_BASE_URL}/services/aigc/image-generation/generation`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'X-DashScope-Async': 'enable',
-    },
-    body: JSON.stringify({
+  let upstream;
+  try {
+    // This POST may create a billable task. Never retry it automatically: if the
+    // response is lost, retrying could create and charge for a duplicate task.
+    upstream = await fetchUpstream(`${env.DASHSCOPE_BASE_URL || DASHSCOPE_BASE_URL}/services/aigc/image-generation/generation`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-DashScope-Async': 'enable',
+      },
+      body: JSON.stringify({
+        model: profile.model,
+        input: { messages: [{ role: 'user', content }] },
+        parameters,
+      }),
+    }, UPSTREAM_TIMEOUTS.submit);
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'qwen_submission_uncertain', requestId, stage: 'submit', model: profile.model, errorName: error?.name || 'Error', errorDetail: safeErrorDetail(error) }));
+    return jsonResponse({ error: {
+      code: 'QWEN_SUBMISSION_UNCERTAIN',
+      message: '提交响应中断，千问可能已经接单。系统不会自动重提，请点击“查找原任务”恢复，避免重复计费。',
+      requestId,
+      stage: 'submit',
       model: profile.model,
-      input: { messages: [{ role: 'user', content }] },
-      parameters,
-    }),
-  }, UPSTREAM_TIMEOUTS.submit);
+      uncertain: true,
+    } }, isTimeoutError(error) ? 504 : 502);
+  }
 
   const data = await upstream.json().catch(() => ({}));
   if (!upstream.ok || !data?.output?.task_id) {
@@ -547,7 +590,7 @@ async function getQwenTask(taskId, env, apiKey) {
   if (!TASK_ID_PATTERN.test(taskId)) return jsonResponse({ error: { code: 'INVALID_TASK_ID', message: '任务编号格式无效。' } }, 400);
   const upstream = await fetchUpstream(`${env.DASHSCOPE_BASE_URL || DASHSCOPE_BASE_URL}/tasks/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  }, UPSTREAM_TIMEOUTS.task);
+  }, { timeout: UPSTREAM_TIMEOUTS.task, retries: 2 });
   const data = await upstream.json().catch(() => ({}));
   if (!upstream.ok) {
     if (upstream.status === 401 || data?.code === 'InvalidApiKey') return jsonResponse({ error: { code: 'KEY_INVALID', message: upstreamErrorMessage(data, upstream.status) } }, 401);
@@ -561,6 +604,68 @@ async function getQwenTask(taskId, env, apiKey) {
     imageUrls,
     error: output.message ? { code: output.code || 'GENERATION_FAILED', message: String(output.message).slice(0, 240) } : null,
   });
+}
+
+function dashscopeTime(value) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value)).map((part) => [part.type, part.value]));
+  return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}${parts.second}`;
+}
+
+function taskCreatedAt(record) {
+  const value = record?.gmt_create ?? record?.created_at ?? record?.create_time;
+  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function recoverQwenTask(request, env, apiKey) {
+  let body;
+  try { body = await readJsonBody(request); }
+  catch { return jsonResponse({ error: { code: 'INVALID_JSON', message: '任务恢复请求格式无效。' } }, 400); }
+  const submittedAt = Number(body.submittedAt);
+  const profile = qwenGenerationProfile(body.generationMode);
+  const model = typeof body.model === 'string' && Object.values(QWEN_GENERATION_PROFILES).some((item) => item.model === body.model)
+    ? body.model
+    : profile.model;
+  const now = Date.now();
+  if (!Number.isFinite(submittedAt) || submittedAt < now - 24 * 60 * 60 * 1000 || submittedAt > now + 5 * 60 * 1000) {
+    return jsonResponse({ error: { code: 'INVALID_SUBMISSION_TIME', message: '原提交时间无效或已超过千问任务记录保留时间。' } }, 400);
+  }
+  const knownTaskIds = new Set((Array.isArray(body.knownTaskIds) ? body.knownTaskIds : []).filter((value) => TASK_ID_PATTERN.test(String(value))).slice(0, 50));
+  const searchStart = submittedAt - 45 * 1000;
+  const searchEnd = Math.min(now + 15 * 1000, submittedAt + 10 * 60 * 1000);
+  const query = new URLSearchParams({
+    start_time: dashscopeTime(searchStart),
+    end_time: dashscopeTime(searchEnd),
+    model_name: model,
+    page_no: '1',
+    page_size: '50',
+  });
+  const upstream = await fetchUpstream(`${env.DASHSCOPE_BASE_URL || DASHSCOPE_BASE_URL}/tasks?${query}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }, { timeout: UPSTREAM_TIMEOUTS.task, retries: 2 });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    if (upstream.status === 401 || data?.code === 'InvalidApiKey') return jsonResponse({ error: { code: 'KEY_INVALID', message: upstreamErrorMessage(data, upstream.status) } }, 401);
+    return jsonResponse({ error: { code: data?.code || 'QWEN_RECOVERY_ERROR', message: upstreamErrorMessage(data, upstream.status) } }, upstream.status === 429 ? 429 : 502);
+  }
+  const records = Array.isArray(data?.data) ? data.data : Array.isArray(data?.output?.tasks) ? data.output.tasks : [];
+  const candidates = records.filter((record) => {
+    const taskId = String(record?.task_id || '');
+    const createdAt = taskCreatedAt(record);
+    const recordModel = String(record?.model_name || record?.model || '');
+    return TASK_ID_PATTERN.test(taskId)
+      && !knownTaskIds.has(taskId)
+      && (!recordModel || recordModel === model)
+      && (!createdAt || (createdAt >= searchStart && createdAt <= searchEnd));
+  });
+  if (!candidates.length) return jsonResponse({ recovered: false, state: 'not_found', message: '暂未在千问任务记录中找到对应任务。请等待约 30 秒后再次查找；系统不会创建新任务。' });
+  if (candidates.length > 1) return jsonResponse({ error: { code: 'QWEN_RECOVERY_AMBIGUOUS', message: `同一时间段找到 ${candidates.length} 个可能任务，系统为避免认错任务未自动绑定。请先在千问平台核对任务记录。`, candidateCount: candidates.length } }, 409);
+  const record = candidates[0];
+  return jsonResponse({ recovered: true, taskId: String(record.task_id), taskStatus: String(record.task_status || record.status || 'PENDING'), model });
 }
 
 async function planCity(request, env, apiKey, provider) {
@@ -589,7 +694,7 @@ async function planCity(request, env, apiKey, provider) {
   return jsonResponse({ city, prompt: prompt.trim(), model, verified: false });
 }
 
-async function handleApi(request, env) {
+async function handleApi(request, env, requestId) {
   const url = new URL(request.url);
   if (url.pathname === '/api/config' && request.method === 'GET') return jsonResponse(publicConfig(env));
   if (url.pathname.startsWith('/api/auth/')) return handleAuthRoute(request, env);
@@ -607,7 +712,8 @@ async function handleApi(request, env) {
     const apiKey = qwenApiKey(request);
     if (!apiKey) return jsonResponse({ error: { code: 'KEY_REQUIRED', message: '请先输入有效的千问 API Key。' } }, 401);
     if (url.pathname === '/api/qwen/validate' && request.method === 'POST') return validateQwenKey(apiKey, env);
-    if (url.pathname === '/api/qwen/generate' && request.method === 'POST') return createQwenTask(request, env, apiKey);
+    if (url.pathname === '/api/qwen/generate' && request.method === 'POST') return createQwenTask(request, env, apiKey, requestId);
+    if (url.pathname === '/api/qwen/recover-task' && request.method === 'POST') return recoverQwenTask(request, env, apiKey);
     if (url.pathname === '/api/qwen/inspect-image' && request.method === 'POST') return inspectQwenImage(request, env, apiKey);
     if (url.pathname === '/api/qwen/plan-city' && request.method === 'POST') return planCity(request, env, apiKey, 'qwen');
     const taskMatch = url.pathname.match(/^\/api\/qwen\/tasks\/([^/]+)$/);
@@ -631,16 +737,21 @@ export default {
       const requestId = requestIdFor(request);
       const startedAt = Date.now();
       try {
-        const response = await handleApi(request, env);
+        const response = await handleApi(request, env, requestId);
         logEvent('api_request', { requestId, method: request.method, path: url.pathname, status: response.status, durationMs: Date.now() - startedAt });
         return responseWithRequestId(response, requestId);
       } catch (error) {
-        const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+        const timedOut = isTimeoutError(error);
         const code = timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_CONNECTION_ERROR';
-        const message = timedOut
-          ? '模型服务响应超时，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。'
-          : '模型连接中断，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。';
-        logEvent('api_error', { requestId, method: request.method, path: url.pathname, code, errorName: error?.name || 'Error', durationMs: Date.now() - startedAt });
+        const potentiallyBillable = request.method === 'POST' && ['/api/qwen/generate', '/api/openai/generate'].includes(url.pathname);
+        const message = potentiallyBillable
+          ? timedOut
+            ? '模型服务响应超时，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。'
+            : '模型连接中断，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。'
+          : timedOut
+            ? '服务查询超时，本次没有创建新的生图任务，请稍后重试。'
+            : '服务查询连接中断，本次没有创建新的生图任务，请稍后重试。';
+        console.error(JSON.stringify({ event: 'api_error', requestId, method: request.method, path: url.pathname, code, errorName: error?.name || 'Error', errorDetail: safeErrorDetail(error), durationMs: Date.now() - startedAt }));
         return responseWithRequestId(jsonResponse({ error: { code, message, requestId } }, timedOut ? 504 : 502), requestId);
       }
     }

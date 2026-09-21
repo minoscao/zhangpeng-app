@@ -190,9 +190,9 @@ const PROVIDERS = Object.freeze({
   qwen: Object.freeze({
     name: '阿里千问', shortName: '千问', keyStorage: QWEN_KEY_STORAGE, keyLabel: '千问 API Key', avatar: 'Q',
     profiles: Object.freeze({
-      fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 5 }),
-      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '2048 长边精细输出，强化场景空间与人物清晰度', submitLimit: 5, concurrency: 5 }),
-      wan: Object.freeze({ name: '万相 · 产品一致性', model: 'Wan 2.6 Image', code: 'wan2.6-image', detail: '参考图编辑 · 关闭扩写，保留明确需求', submitLimit: 5, concurrency: 2 }),
+      fast: Object.freeze({ name: '快速出图', model: 'Qwen Image 3.0', code: 'qwen-image-3.0', detail: '关闭深度思考，优先缩短等待', submitLimit: 20, concurrency: 1 }),
+      quality: Object.freeze({ name: '精细出图', model: 'Qwen Image 3.0 Pro', code: 'qwen-image-3.0-pro', detail: '2048 长边精细输出，强化场景空间与人物清晰度', submitLimit: 5, concurrency: 1 }),
+      wan: Object.freeze({ name: '万相 · 产品一致性', model: 'Wan 2.6 Image', code: 'wan2.6-image', detail: '参考图编辑 · 关闭扩写，保留明确需求', submitLimit: 5, concurrency: 1 }),
     }),
   }),
 });
@@ -899,7 +899,12 @@ function renderResultGroups() {
       const label = variantLabel(index);
       const ratio = /^\d+:\d+$/.test(item.ratio || '') ? item.ratio.replace(':', ' / ') : '4 / 3';
       const mapSource = item.sceneGrounding?.sources?.[0];
-      if (item.status === 'delayed') return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} 等待时间较长</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p><button data-action="check-result" data-id="${item.id}">${svgIcon('refresh')}查询结果</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      if (item.status === 'delayed') {
+        const submissionUncertain = !item.taskId && ['SUBMISSION_UNCERTAIN', 'RECOVERING'].includes(item.remoteStatus);
+        const recovering = item.remoteStatus === 'RECOVERING';
+        const diagnostic = item.platformRequestId ? `<small>诊断编号：${escapeHtml(item.platformRequestId)}</small>` : '';
+        return `<article class="result-card is-delayed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${submissionUncertain ? '提交状态待确认' : '等待时间较长'}</strong><p>${escapeHtml(item.error || '原任务已保留，可继续查询且不会重复扣分。')}</p>${diagnostic}<button data-action="${submissionUncertain ? 'recover-qwen-task' : 'check-result'}" data-id="${item.id}" ${recovering ? 'disabled' : ''}>${svgIcon('refresh')}${recovering ? '正在查找' : submissionUncertain ? '查找原任务' : '查询结果'}</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
+      }
       if (item.status === 'failed') return `<article class="result-card is-failed"><div class="result-error" style="aspect-ratio:${ratio}"><strong>${label} ${item.is4k ? '4K 尺寸处理失败' : '生成失败'}</strong><p>${escapeHtml(item.error || '模型暂时无法完成这张图片。')}</p><button data-action="${item.is4k ? 'generate-4k-result' : 'regenerate-result'}" data-id="${item.is4k ? item.sourceResultId : item.id}">${svgIcon('refresh')}重试</button></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       if (item.status !== 'ready') return `<article class="result-card is-loading"><div class="result-skeleton" style="aspect-ratio:${ratio}"><span>${label}</span><small>${item.status === 'upscaling' ? '4K 尺寸处理中' : item.status === 'queued' ? '等待提交' : item.status === 'submitting' ? '正在提交任务' : item.remoteStatus === 'VERIFYING' ? '自动检查人数与互动' : item.remoteStatus === 'REPAIRING' ? '人物未达标 · 自动修复中' : item.remoteStatus === 'PENDING' ? '模型排队中' : item.remoteStatus === 'RETRYING' ? '查询暂时失败 · 自动重试中' : `生成中 · ${elapsedMinutes(item.submittedAt)} 分钟`}</small></div><div class="result-tags">${item.tags.slice(0, 2).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
       return `<article class="result-card"><button class="image-preview-button result-preview-trigger" data-action="preview-result" data-id="${item.id}" aria-label="查看${escapeHtml(product.name)}创意素材 ${label} 大图"><img src="${escapeHtml(item.image)}" alt="${escapeHtml(product.name)}创意素材 ${label}" style="aspect-ratio:${ratio}"></button><span class="result-code">${item.is4k ? '4K 尺寸' : label}</span><div class="result-model">${escapeHtml(item.model || item.generationMode || '旧批次')} · ${item.review === 'pass' ? '验收通过' : item.review === 'fail' ? '需重做' : '待验收'}${mapSource ? `<a class="result-map-source" href="${escapeHtml(mapSource.url)}" target="_blank" rel="noopener noreferrer">Google Maps 场景来源</a>` : ''}</div><div class="result-actions">${item.is4k ? '' : `<button class="result-4k-button" data-action="generate-4k-result" data-id="${item.id}" aria-label="生成素材 ${label} 的 4K 尺寸版，不增加细节，不扣积分" title="4K 尺寸导出 · 浏览器插值，不增加模型细节">4K 尺寸</button>`}<button data-action="download-result" data-id="${item.id}" aria-label="下载素材 ${label}">${svgIcon('download')}</button>${item.is4k ? '' : `<button data-action="regenerate-result" data-id="${item.id}" aria-label="重新生成素材 ${label}">${svgIcon('refresh')}</button>`}<button data-action="delete-result" data-id="${item.id}" aria-label="删除素材 ${label}">${svgIcon('trash')}</button></div><div class="result-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div></article>`;
@@ -1440,6 +1445,10 @@ async function apiJson(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data?.error?.message || '请求失败，请稍后重试。');
     error.code = data?.error?.code || `HTTP_${response.status}`;
+    error.requestId = data?.error?.requestId || response.headers.get('X-Request-Id') || '';
+    error.stage = data?.error?.stage || '';
+    error.model = data?.error?.model || '';
+    error.uncertain = Boolean(data?.error?.uncertain);
     if (error.code === 'AUTH_REQUIRED') {
       authRuntime.user = null;
       authRuntime.view = 'login';
@@ -1637,12 +1646,15 @@ async function submitQwenResult(result) {
   const product = result.productSnapshot || productById(result.productId);
   if (!product) throw new Error('找不到对应产品。');
   result.status = 'submitting';
-  result.submittedAt = Date.now();
-  result.remoteStatus = 'SUBMITTING';
+  result.submittedAt = 0;
+  result.remoteStatus = 'PREPARING';
   result.error = '';
   saveState(); render();
   const referenceImages = await referenceImagesForResult(result, product);
   result.requestId ||= uid('request');
+  result.submittedAt = Date.now();
+  result.remoteStatus = 'SUBMITTING';
+  saveState(); render();
   const task = await apiJson('/api/qwen/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': result.requestId },
@@ -1726,9 +1738,20 @@ async function runWithConcurrency(items, concurrency, operation) {
       try {
         await operation(item);
       } catch (error) {
-        item.status = 'failed';
-        item.error = error.message;
-        refundResultCredit(item);
+        if (error.code === 'QWEN_SUBMISSION_UNCERTAIN') {
+          item.status = 'delayed';
+          item.remoteStatus = 'SUBMISSION_UNCERTAIN';
+          item.platformRequestId = error.requestId || item.requestId || '';
+          item.model = error.model || item.model;
+          item.error = error.message;
+          // Stop the remaining submissions so the task-list recovery window has
+          // at most one unknown task from this app and cannot bind the wrong job.
+          activeGenerationId = '';
+        } else {
+          item.status = 'failed';
+          item.error = error.message;
+          refundResultCredit(item);
+        }
         if (error.code === 'KEY_REQUIRED' || error.code === 'KEY_INVALID') activeGenerationId = '';
       }
       saveState(); render();
@@ -1806,8 +1829,10 @@ function finishBatch(batchId) {
       item.error = '任务尚未提交，未产生模型任务，可直接重试。';
       refundResultCredit(item);
     } else if (item.status === 'submitting' && !item.taskId) {
-      item.status = 'failed';
-      item.error = '提交期间中断，未取得任务编号。请先核对模型平台记录，再决定是否重试。';
+      item.status = 'delayed';
+      item.remoteStatus = 'SUBMISSION_UNCERTAIN';
+      item.platformRequestId ||= item.requestId || '';
+      item.error = '提交期间中断，千问可能已经接单。请先点击“查找原任务”，系统不会自动重复提交。';
     } else if (item.status === 'loading' && item.taskId) {
       item.status = 'delayed';
       item.error ||= '查询已暂停，原任务仍被保留。点击“查询结果”继续查看，不会重复提交或扣分。';
@@ -1926,6 +1951,50 @@ async function checkExistingResult(id) {
   await pollQwenBatch(state.batch.id);
 }
 
+async function recoverUncertainQwenTask(id) {
+  if (activeGenerationId || state.batch.status === 'generating') return;
+  const item = state.batch.results.find((result) => result.id === id);
+  if (!item || item.taskId || item.remoteStatus !== 'SUBMISSION_UNCERTAIN') return;
+  if (!getProviderApiKey('qwen')) { openApiKeyDialog('qwen', `recover-task:${id}`); return; }
+  const authorized = await checkProviderAuthorization('qwen', false);
+  if (!authorized) { openApiKeyDialog('qwen', `recover-task:${id}`); keyDialogError = '请输入原任务使用的有效千问密钥。'; render(); return; }
+  item.remoteStatus = 'RECOVERING';
+  item.error = '正在千问任务记录中查找原任务，不会创建新任务。';
+  saveState(); render();
+  try {
+    const knownTaskIds = state.batch.results.map((result) => result.taskId).filter(Boolean);
+    const recovery = await apiJson('/api/qwen/recover-task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Request-Id': item.requestId || uid('recover') },
+      body: JSON.stringify({ submittedAt: item.submittedAt, model: item.model, generationMode: item.generationMode, knownTaskIds }),
+    });
+    if (!recovery.recovered) {
+      item.remoteStatus = 'SUBMISSION_UNCERTAIN';
+      item.error = recovery.message || '暂未找到对应任务，请稍后再次查找。';
+      saveState(); render();
+      showToast('暂未找到原任务', item.error, 'info');
+      return;
+    }
+    item.taskId = recovery.taskId;
+    item.model = recovery.model || item.model;
+    item.status = 'loading';
+    item.remoteStatus = recovery.taskStatus || 'PENDING';
+    item.error = '';
+    state.batch.status = 'generating';
+    state.batch.submissionComplete = true;
+    state.batch.finishedAtMs = 0;
+    activeGenerationId = state.batch.id;
+    saveState(); render();
+    showToast('已找回原任务', '正在继续查询结果，没有重复提交或扣分。', 'check');
+    await pollQwenBatch(state.batch.id);
+  } catch (error) {
+    item.remoteStatus = 'SUBMISSION_UNCERTAIN';
+    item.error = error.message;
+    saveState(); render();
+    showToast('原任务查找未完成', error.message, 'info');
+  }
+}
+
 async function resumePendingBatch() {
   if (state.batch.status !== 'generating') return;
   state.batch.startedAtMs ||= Date.now();
@@ -1933,11 +2002,21 @@ async function resumePendingBatch() {
   const neverSubmitted = state.batch.results.filter((item) => item.status === 'queued' && !item.taskId);
   neverSubmitted.forEach((item) => { item.status = 'failed'; item.error = '页面关闭前任务尚未提交，可直接重试。'; refundResultCredit(item); });
   const interrupted = state.batch.results.filter((item) => ['submitting', 'loading'].includes(item.status) && !item.taskId);
-  interrupted.forEach((item) => { item.status = 'failed'; item.error = '页面在提交期间中断，未取得可查询任务编号。原请求可能已计费；请先检查平台记录，再决定是否重新生成。'; });
+  interrupted.forEach((item) => {
+    if ((item.provider || state.batch.provider || 'qwen') === 'qwen' && item.submittedAt) {
+      item.status = 'delayed';
+      item.remoteStatus = 'SUBMISSION_UNCERTAIN';
+      item.platformRequestId ||= item.requestId || '';
+      item.error = '页面在提交期间中断，千问可能已经接单。请点击“查找原任务”，系统不会自动重复提交。';
+    } else {
+      item.status = 'failed';
+      item.error = '页面在同步生成期间中断，原请求可能已计费；请确认平台记录后再决定是否重新生成。';
+    }
+  });
   const pending = state.batch.results.filter((item) => item.status === 'loading' && item.taskId);
   if (!pending.length) {
     state.batch.finishedAtMs ||= Date.now();
-    state.batch.status = batchReadyCount() ? 'ready' : 'failed';
+    state.batch.status = batchDelayedCount() ? 'delayed' : batchReadyCount() ? 'ready' : 'failed';
     saveState(); render();
     return;
   }
@@ -2195,6 +2274,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'regenerate-result') await regenerateResult(button.dataset.id);
   if (action === 'generate-4k-result') await generate4KResult(button.dataset.id);
   if (action === 'check-result') await checkExistingResult(button.dataset.id);
+  if (action === 'recover-qwen-task') await recoverUncertainQwenTask(button.dataset.id);
   if (action === 'delete-result') { if (activeGenerationId || state.batch.status === 'generating') { showToast('批次仍在生成', '请等本批次结束后删除结果。', 'info'); return; } state.batch.results = state.batch.results.filter((item) => item.id !== button.dataset.id); if (!state.batch.results.some((item) => item.status === 'loading')) state.batch.status = 'ready'; saveState(); render(); }
   if (action === 'save-batch') saveBatch();
   if (action === 'use-template') {
@@ -2272,6 +2352,7 @@ document.addEventListener('click', async (event) => {
     if (nextAction === 'generate') await startBatchGeneration();
     if (nextAction.startsWith('regenerate:')) await regenerateResult(nextAction.slice('regenerate:'.length));
     if (nextAction.startsWith('check-result:')) await checkExistingResult(nextAction.slice('check-result:'.length));
+    if (nextAction.startsWith('recover-task:')) await recoverUncertainQwenTask(nextAction.slice('recover-task:'.length));
     if (nextAction === 'resume') await resumePendingBatch();
     if (nextAction.startsWith('city:')) await enrichCity(nextAction.slice('city:'.length));
   }

@@ -139,6 +139,9 @@ run('state.batch.status = "generating"; state.batch.results = [{status: "loading
 await run('resumePendingBatch()');
 assert.equal(run('state.batch.results[0].status'), 'failed');
 assert.match(run('state.batch.results[0].error'), /可能已计费/);
+assert.match(run('renderResultGroups.toString()'), /recover-qwen-task/);
+assert.match(run('runWithConcurrency.toString()'), /QWEN_SUBMISSION_UNCERTAIN/);
+assert.match(run('recoverUncertainQwenTask.toString()'), /recover-task/);
 
 run(`state = structuredClone(seedState);
   state.savedAssets = [];
@@ -215,7 +218,8 @@ run(`state = structuredClone(seedState); state.credits = 100; state.batch = {id:
 ]}; activeGenerationId = ''; productionFinishBatch('B-STOP');`);
 assert.equal(run('state.batch.status'), 'delayed');
 assert.equal(run("state.batch.results.find((item) => item.id === 'queued').status"), 'failed');
-assert.equal(run("state.batch.results.find((item) => item.id === 'submitting').status"), 'failed');
+assert.equal(run("state.batch.results.find((item) => item.id === 'submitting').status"), 'delayed');
+assert.equal(run("state.batch.results.find((item) => item.id === 'submitting').remoteStatus"), 'SUBMISSION_UNCERTAIN');
 assert.equal(run("state.batch.results.find((item) => item.id === 'running').status"), 'delayed');
 assert.equal(run('state.credits'), 103);
 run('sleep = productionSleep; apiJson = productionApiJson;');
