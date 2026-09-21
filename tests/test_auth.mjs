@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import worker from '../worker.js';
+import { __authTest } from '../auth.js';
 
 class D1Statement {
   constructor(database, sql, params = []) {
@@ -44,6 +45,8 @@ const env = {
   EMAIL: { send: async (message) => { sentEmails.push(message); } },
   ASSETS: { fetch: async () => new Response('asset') },
 };
+
+assert.equal(__authTest.PASSWORD_ITERATIONS, 100_000, 'Cloudflare Workers PBKDF2 limit must not be exceeded');
 
 async function jsonRequest(path, method = 'GET', body, cookie = '') {
   const headers = { Origin: 'https://app.example', 'CF-Connecting-IP': '203.0.113.7' };
@@ -115,5 +118,20 @@ assert.match(changeResponse.headers.get('set-cookie'), /__Host-designflow_sessio
 const logoutResponse = await jsonRequest('/api/auth/logout', 'POST', {}, changeResponse.headers.get('set-cookie').split(';')[0]);
 assert.equal(logoutResponse.status, 200);
 assert.match(logoutResponse.headers.get('set-cookie'), /Max-Age=0/);
+
+const brokenAuthEnv = {
+  AUTH_DB: { prepare() { throw new DOMException('simulated account binding failure', 'NotSupportedError'); } },
+  ASSETS: env.ASSETS,
+};
+const brokenAuthResponse = await worker.fetch(new Request('https://app.example/api/auth/register', {
+  method: 'POST',
+  headers: { Origin: 'https://app.example', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: '异常测试', email: 'broken@example.com', password: 'Strong!Password2026' }),
+}), brokenAuthEnv);
+const brokenAuth = await brokenAuthResponse.json();
+assert.equal(brokenAuthResponse.status, 500);
+assert.equal(brokenAuth.error.code, 'AUTH_SERVICE_ERROR');
+assert.match(brokenAuth.error.message, /账户服务/);
+assert.doesNotMatch(brokenAuth.error.message, /生图任务/);
 
 console.log('Cloudflare account authentication tests passed.');

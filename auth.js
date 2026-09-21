@@ -1,7 +1,10 @@
 const SESSION_COOKIE = '__Host-designflow_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const RESET_TTL_SECONDS = 30 * 60;
-const PASSWORD_ITERATIONS = 600_000;
+// Cloudflare Workers Web Crypto rejects PBKDF2 iteration counts above 100,000.
+// Keep the exact applied value with each user so a future algorithm upgrade can
+// remain backward-compatible with existing password hashes.
+const PASSWORD_ITERATIONS = 100_000;
 const PASSWORD_MIN_LENGTH = 10;
 const PASSWORD_MAX_LENGTH = 128;
 const AUTH_BODY_LIMIT = 16 * 1024;
@@ -363,4 +366,4 @@ export async function handleAuthRoute(request, env) {
   return authJson({ error: { code: 'NOT_FOUND', message: '账户接口不存在。' } }, 404);
 }
 
-export const __authTest = { derivePasswordHash, sha256, normalizeEmail, passwordProblem, sessionCookie };
+export const __authTest = { derivePasswordHash, sha256, normalizeEmail, passwordProblem, sessionCookie, PASSWORD_ITERATIONS };

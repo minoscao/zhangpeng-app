@@ -742,9 +742,12 @@ export default {
         return responseWithRequestId(response, requestId);
       } catch (error) {
         const timedOut = isTimeoutError(error);
-        const code = timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_CONNECTION_ERROR';
+        const accountRequest = url.pathname.startsWith('/api/auth/');
+        const code = accountRequest ? 'AUTH_SERVICE_ERROR' : timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_CONNECTION_ERROR';
         const potentiallyBillable = request.method === 'POST' && ['/api/qwen/generate', '/api/openai/generate'].includes(url.pathname);
-        const message = potentiallyBillable
+        const message = accountRequest
+          ? '账户服务暂时无法完成请求，请稍后重试；系统不会创建重复账户。'
+          : potentiallyBillable
           ? timedOut
             ? '模型服务响应超时，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。'
             : '模型连接中断，未取得确认结果。原请求可能已计费，请先检查平台任务记录再重试。'
@@ -752,7 +755,7 @@ export default {
             ? '服务查询超时，本次没有创建新的生图任务，请稍后重试。'
             : '服务查询连接中断，本次没有创建新的生图任务，请稍后重试。';
         console.error(JSON.stringify({ event: 'api_error', requestId, method: request.method, path: url.pathname, code, errorName: error?.name || 'Error', errorDetail: safeErrorDetail(error), durationMs: Date.now() - startedAt }));
-        return responseWithRequestId(jsonResponse({ error: { code, message, requestId } }, timedOut ? 504 : 502), requestId);
+        return responseWithRequestId(jsonResponse({ error: { code, message, requestId } }, accountRequest ? 500 : timedOut ? 504 : 502), requestId);
       }
     }
     return env.ASSETS.fetch(request);
