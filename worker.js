@@ -1,3 +1,5 @@
+import { authPublicConfig, handleAuthRoute, requireAuthenticatedUser } from './auth.js';
+
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const DASHSCOPE_MODELS_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -83,6 +85,7 @@ function publicConfig(env) {
     },
     generationProfiles: Object.keys(OPENAI_GENERATION_PROFILES),
     maxBatchSize: 24,
+    auth: authPublicConfig(env),
   };
 }
 
@@ -589,6 +592,10 @@ async function planCity(request, env, apiKey, provider) {
 async function handleApi(request, env) {
   const url = new URL(request.url);
   if (url.pathname === '/api/config' && request.method === 'GET') return jsonResponse(publicConfig(env));
+  if (url.pathname.startsWith('/api/auth/')) return handleAuthRoute(request, env);
+
+  const auth = await requireAuthenticatedUser(request, env);
+  if (auth instanceof Response) return auth;
 
   if (url.pathname === '/api/maps/ground-scene' && request.method === 'POST') {
     const apiKey = googleMapsApiKey(request);

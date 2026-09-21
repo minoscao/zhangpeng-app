@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "zhangpeng-app",
   "main": "./worker.js",
-  "compatibility_date": "2026-09-16",
+  "compatibility_date": "2026-09-21",
   "assets": {
     "directory": "./app",
     "binding": "ASSETS",
@@ -12,5 +12,22 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
-  }
+  },
+  "vars": {
+    "AUTH_EMAIL_FROM": "no-reply@mia-dynamic.com"
+  },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["no-reply@mia-dynamic.com"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "zhangpeng-app-auth",
+      "database_id": "532bb74c-e462-4376-829d-7a2510f53a17",
+      "migrations_dir": "./migrations"
+    }
+  ]
 }

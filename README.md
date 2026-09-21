@@ -10,7 +10,8 @@
 4. 产品库、素材库、批次记录与验收结果分离
 5. 帐篷批量创作、通用商品白底图和场景换图模板会真实应用到当前配方
 6. 按全部素材、SKU 或批次导出 ZIP，并保留提示词与验收清单
-7. 本地状态保存与 Windows EXE 构建
+7. Cloudflare 账户注册、登录、退出、个人资料、改密和密码找回
+8. 本地状态保存与 Windows EXE 构建
 
 默认生成模式为“精细成片”。“当地背景”会为每座城市指定一个可辨认的主地标、合理机位和量化画面占比，并要求图生图时彻底替换参考图原有白底或旧场景；普通草坪、无名住宅和不可辨认的背景虚化不算完成地域要求。千问的长提示词关闭二次自动改写，避免地域硬约束被模型重写稀释；精细模式采用 2048 像素长边输出，并约束单一透视、连续地面、统一光向、真实产品尺度和人物焦平面。“产品配色”只调整帐篷面料，不给整张图片套色。
 
@@ -33,6 +34,18 @@
 浏览器在每次生成与任务查询时通过 HTTPS 把对应密钥发送给 Worker，Worker 只负责转发，不持久化、不返回密钥。模型连接页可分别更换或清除两个平台在本标签页中的密钥。
 
 批量创作会把 SKU 产品图作为参考图。OpenAI 同步返回图片，千问通过异步任务生成并轮询结果；系统会按各平台的节奏分批提交。阿里返回的图片 URL 仅在 24 小时内有效，OpenAI 返回的图片只在当前标签页保留，因此两种通道都应在生成后及时下载。
+
+## Cloudflare 账户管理
+
+线上版通过 Cloudflare D1 保存用户、登录会话和一次性密码重置凭据。密码使用独立随机盐与 PBKDF2-SHA-256 摘要保存；浏览器只持有 `Secure`、`HttpOnly`、`SameSite=Strict` 会话 Cookie。登录后，产品与设计状态在浏览器存储中按用户 ID 隔离，OpenAI、千问和 Google Maps 接口也只允许已登录用户调用。
+
+数据库迁移位于 `migrations/`。部署前先创建 D1 数据库并执行：
+
+```powershell
+wrangler d1 migrations apply zhangpeng-app-auth --remote
+```
+
+密码找回邮件使用 Cloudflare Email Service，当前发件地址为已验证域名下的 `no-reply@mia-dynamic.com`。`EMAIL` 绑定只允许使用该发件地址；重置令牌 30 分钟有效、仅可使用一次，重置成功后会撤销该用户原有会话。
 
 ## 核心数据对象
 
@@ -63,11 +76,13 @@ wrangler deploy --dry-run
 wrangler deploy --keep-vars
 ```
 
-Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责无状态转发 OpenAI 与千问接口；`app/assets/studio/` 保存线上工作台图片。不需要配置 Cloudflare Access 或模型密钥 Secret。
+Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js` 负责账户鉴权并无状态转发 OpenAI 与千问接口；`app/assets/studio/` 保存线上工作台图片。不需要配置 Cloudflare Access 或模型密钥 Secret。
 
 ## 目录
 
 - `app/`：界面与交互逻辑
+- `auth.js`：Cloudflare 账户、会话、密码与找回流程
+- `migrations/`：D1 数据库迁移
 - `assets/studio/`：设计工作台使用的真实图片素材
 - `data/`：运行时本地状态
 - `docs/`：产品审计、设计依据与需求文档
@@ -76,6 +91,6 @@ Cloudflare 的 Git 构建继续以 `app/` 作为静态资源目录，`worker.js`
 ## 生产化前必须完成
 
 - 长期图片对象存储与自动备份
-- 多用户角色、用量账单和审计日志
+- 管理员角色、用量账单和审计日志
 - 真正的 AI 超分辨率；当前“4K 尺寸版”仅做本地像素尺寸导出，不增加图像细节
 - Windows 安装包、代码签名与自动更新

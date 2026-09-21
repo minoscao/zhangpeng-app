@@ -27,6 +27,10 @@ const icons = {
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/>',
   folder: '<path d="M3 6h7l2 2h9v11H3Z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
+  lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  shield: '<path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
 };
 
 const svgIcon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.box}</svg>`;
@@ -255,7 +259,7 @@ const seedState = {
   batchHistory: [],
   studio: { selectedProductIds: ['p-1', 'p-2', 'p-3'], templateId: 'tpl-tent', publicPromptId: 'brief', requirements: '', otherRequirements: '', universalPrompt: DEFAULT_UNIVERSAL_PROMPT, provider: 'openai', generationMode: 'quality', model: 'gpt-image-2.5-sunburst', ratio: '4:3' },
   batch: { id: '', status: 'idle', results: [], plannedTotal: 18, startedAt: '', savedAt: '' },
-  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false, batchAuditOpen: false, exportScope: 'all', exportTarget: '', exportFormat: 'original' },
+  ui: { route: 'products', productSearch: '', productCategory: '全部品类', drawerProductId: '', drawerTab: 'info', assetFilter: '全部', productPickerOpen: false, promptDialogGroupId: '', confirmBatch: false, batchAuditOpen: false, accountDialogOpen: false, exportScope: 'all', exportTarget: '', exportFormat: 'original' },
   connection: { provider: 'openai', userKeyRequired: true, authenticated: { openai: false, qwen: false }, model: 'gpt-image-2' },
 };
 
@@ -292,7 +296,16 @@ let durableStateDb;
 let storageWarningShown = false;
 let generationStarting = false;
 let hostStateWritable = false;
+const authRuntime = { required: false, registrationEnabled: false, recoveryEnabled: false, user: null, view: 'login', busy: false, error: '', notice: '', resetToken: '' };
 const exportRuntime = { busy: false, message: '', error: '' };
+
+function stateStorageKey() {
+  return authRuntime.user?.id ? `designflow-state:${authRuntime.user.id}` : 'designflow-state';
+}
+
+function durableStateKey() {
+  return authRuntime.user?.id ? `current:${authRuntime.user.id}` : 'current';
+}
 
 function stateDatabase() {
   durableStateDb ||= new Promise((resolve, reject) => {
@@ -308,7 +321,7 @@ async function persistDurableState(snapshot) {
   const db = await stateDatabase();
   await new Promise((resolve, reject) => {
     const transaction = db.transaction('state', 'readwrite');
-    transaction.objectStore('state').put(snapshot, 'current');
+    transaction.objectStore('state').put(snapshot, durableStateKey());
     transaction.oncomplete = resolve;
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
@@ -419,14 +432,64 @@ function applySavedState(saved) {
 }
 
 function loadLocalState() {
-  try { applySavedState(JSON.parse(localStorage.getItem('designflow-state') || 'null')); } catch { /* use seed */ }
+  try {
+    const scopedKey = stateStorageKey();
+    let serialized = localStorage.getItem(scopedKey);
+    if (!serialized && authRuntime.user?.id) {
+      serialized = localStorage.getItem('designflow-state');
+      if (serialized) {
+        localStorage.setItem(scopedKey, serialized);
+        localStorage.removeItem('designflow-state');
+      }
+    }
+    applySavedState(JSON.parse(serialized || 'null'));
+  } catch { /* use seed */ }
+}
+
+async function loadBootstrapAuth() {
+  let config = {};
+  let configLoaded = false;
+  try {
+    const response = await fetch('/api/config', { cache: 'no-store' });
+    if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+      config = await response.json();
+      configLoaded = true;
+    }
+  } catch { /* local desktop mode can continue without cloud config */ }
+  const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) || location.protocol === 'file:';
+  if (!configLoaded && !localHost) {
+    authRuntime.required = true;
+    authRuntime.registrationEnabled = false;
+    authRuntime.error = '暂时无法连接账户服务，请检查网络后刷新页面。';
+    return false;
+  }
+  state.connection.provider = config.provider || 'openai';
+  state.connection.userKeyRequired = config.userKeyRequired !== false;
+  state.connection.model = config.model || 'gpt-image-2';
+  authRuntime.required = Boolean(config.auth?.required);
+  authRuntime.registrationEnabled = Boolean(config.auth?.registrationEnabled);
+  authRuntime.recoveryEnabled = Boolean(config.auth?.passwordResetEnabled);
+  if (!authRuntime.required) return true;
+  try {
+    const response = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
+    if (!response.ok) throw new Error('AUTH_SESSION_UNAVAILABLE');
+    const result = await response.json();
+    authRuntime.user = result.authenticated ? result.user : null;
+    authRuntime.recoveryEnabled = Boolean(result.recoveryEnabled);
+    return Boolean(authRuntime.user);
+  } catch {
+    authRuntime.error = '暂时无法连接账户服务，请检查网络后刷新页面。';
+    return false;
+  }
 }
 
 async function loadState() {
   try {
     const db = await stateDatabase();
     const saved = await new Promise((resolve, reject) => {
-      const request = db.transaction('state').objectStore('state').get('current');
+      const store = db.transaction('state', 'readwrite').objectStore('state');
+      const scopedKey = durableStateKey();
+      const request = store.get(scopedKey);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -439,23 +502,14 @@ async function loadState() {
       applySavedState(await response.json());
     }
   } catch { /* local seed remains usable */ }
-  try {
-    const response = await fetch('/api/config', { cache: 'no-store' });
-    if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
-      const config = await response.json();
-      state.connection.provider = config.provider || 'openai';
-      state.connection.userKeyRequired = config.userKeyRequired !== false;
-      state.connection.model = config.model || 'gpt-image-2';
-    }
-  } catch { /* connection is optional */ }
 }
 
 function saveState() {
   state.updatedAtMs = Date.now();
   try {
     const serialized = JSON.stringify(state);
-    if (serialized.length < 1_500_000) localStorage.setItem('designflow-state', serialized);
-    else localStorage.removeItem('designflow-state');
+    if (serialized.length < 1_500_000) localStorage.setItem(stateStorageKey(), serialized);
+    else localStorage.removeItem(stateStorageKey());
   } catch { /* private mode or quota may reject; IndexedDB remains primary */ }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
@@ -1142,14 +1196,67 @@ function renderImagePreview() {
   return `<div class="image-preview-backdrop" data-action="close-image-preview"><section class="image-preview-panel overlay-panel" role="dialog" aria-modal="true" aria-labelledby="image-preview-title"><header><div><h2 id="image-preview-title">${escapeHtml(imagePreview.title)}</h2><p>${escapeHtml(imagePreview.meta)}</p></div><div class="image-preview-actions"><button class="button button--secondary" data-action="download-preview">${svgIcon('download')}下载原图</button><button class="icon-button overlay-close" data-action="close-image-preview" aria-label="关闭大图预览">${svgIcon('x')}</button></div></header><div class="image-preview-stage"><img src="${escapeHtml(imagePreview.image)}" alt="${escapeHtml(imagePreview.title)}大图"></div><p class="image-preview-hint">点击遮罩空白处或按 Esc 关闭</p></section></div>`;
 }
 
+function accountInitials(user = authRuntime.user) {
+  const source = String(user?.name || user?.email || 'DS').trim();
+  return [...source].slice(0, 2).join('').toUpperCase();
+}
+
+function renderAuthSurface() {
+  const root = $('#auth-root');
+  const shell = $('.app-shell');
+  document.body.classList.remove('auth-pending');
+  if (!authRuntime.required || authRuntime.user) {
+    root.hidden = true;
+    shell.hidden = false;
+    return;
+  }
+  shell.hidden = true;
+  root.hidden = false;
+  const message = authRuntime.error ? `<p class="auth-message auth-message--error" role="alert">${escapeHtml(authRuntime.error)}</p>` : authRuntime.notice ? `<p class="auth-message" role="status">${escapeHtml(authRuntime.notice)}</p>` : '';
+  const login = `<form class="auth-form" id="auth-login-form"><div class="auth-form-heading"><h1>欢迎回来</h1><p>登录后继续管理儿童帐篷产品与生成任务。</p></div>${message}<label for="auth-login-email"><span>邮箱</span><input id="auth-login-email" name="email" type="email" autocomplete="email" required placeholder="name@company.com"></label><label for="auth-login-password"><span>密码</span><input id="auth-login-password" name="password" type="password" autocomplete="current-password" required placeholder="输入账户密码"></label><button class="auth-primary" type="submit" ${authRuntime.busy ? 'disabled' : ''}>${authRuntime.busy ? '正在登录…' : '登录工作台'}</button><div class="auth-form-links"><button type="button" data-auth-view="forgot">忘记密码</button>${authRuntime.registrationEnabled ? '<button type="button" data-auth-view="register">创建账户</button>' : ''}</div></form>`;
+  const register = `<form class="auth-form" id="auth-register-form"><div class="auth-form-heading"><h1>创建工作账户</h1><p>账户信息保存在 Cloudflare，设计资料按用户隔离。</p></div>${message}<label for="auth-register-name"><span>姓名</span><input id="auth-register-name" name="name" autocomplete="name" required minlength="2" maxlength="40" placeholder="例如：陈设计"></label><label for="auth-register-email"><span>工作邮箱</span><input id="auth-register-email" name="email" type="email" autocomplete="email" required placeholder="name@company.com"></label><label for="auth-register-password"><span>密码</span><input id="auth-register-password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128" placeholder="至少 10 个字符"></label><label for="auth-register-confirm"><span>确认密码</span><input id="auth-register-confirm" name="confirmPassword" type="password" autocomplete="new-password" required placeholder="再次输入密码"></label><button class="auth-primary" type="submit" ${authRuntime.busy ? 'disabled' : ''}>${authRuntime.busy ? '正在创建…' : '创建并进入工作台'}</button><div class="auth-form-links"><button type="button" data-auth-view="login">已有账户，直接登录</button></div></form>`;
+  const recoveryNote = authRuntime.recoveryEnabled ? '' : '<p class="auth-message auth-message--warning">密码找回邮件尚未配置发件域名，请联系管理员重置。</p>';
+  const forgot = `<form class="auth-form" id="auth-forgot-form"><div class="auth-form-heading"><h1>找回密码</h1><p>输入注册邮箱，系统会发送一条 30 分钟内有效的重置链接。</p></div>${message}${recoveryNote}<label for="auth-forgot-email"><span>注册邮箱</span><input id="auth-forgot-email" name="email" type="email" autocomplete="email" required placeholder="name@company.com"></label><button class="auth-primary" type="submit" ${authRuntime.busy || !authRuntime.recoveryEnabled ? 'disabled' : ''}>${authRuntime.busy ? '正在发送…' : '发送重置邮件'}</button><div class="auth-form-links"><button type="button" data-auth-view="login">返回登录</button></div></form>`;
+  const reset = `<form class="auth-form" id="auth-reset-form"><div class="auth-form-heading"><h1>设置新密码</h1><p>重置链接只能使用一次，修改后其他设备会自动退出。</p></div>${message}<label for="auth-reset-password"><span>新密码</span><input id="auth-reset-password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128" placeholder="至少 10 个字符"></label><label for="auth-reset-confirm"><span>确认新密码</span><input id="auth-reset-confirm" name="confirmPassword" type="password" autocomplete="new-password" required placeholder="再次输入新密码"></label><button class="auth-primary" type="submit" ${authRuntime.busy ? 'disabled' : ''}>${authRuntime.busy ? '正在更新…' : '确认重置密码'}</button><div class="auth-form-links"><button type="button" data-auth-view="login">返回登录</button></div></form>`;
+  const forms = { login, register, forgot, reset };
+  root.innerHTML = `<main class="auth-page"><section class="auth-story" aria-label="产品介绍"><div class="auth-brand"><span>${svgIcon('sparkles')}</span><strong>创想设计平台</strong></div><div class="auth-story-copy"><h2>从真实产品，生成可交付的全球场景素材。</h2><p>账户保护产品库入口；每次生成仍由你确认提示词、模型与费用。</p></div><div class="auth-trust"><span>${svgIcon('shield')}Cloudflare 安全会话</span><span>${svgIcon('lock')}密码仅保存加密摘要</span><span>${svgIcon('database')}设计资料按用户隔离</span></div></section><section class="auth-panel">${forms[authRuntime.view] || login}<p class="auth-security-note">登录状态使用 HttpOnly 安全 Cookie；API Key 仍只保存在当前标签页。</p></section></main>`;
+  hydrateIcons(root);
+  requestAnimationFrame(() => root.querySelector('input')?.focus());
+}
+
+function syncAccountShell() {
+  const profile = $('#profile-button');
+  const sessionAction = $('#session-action');
+  if (!profile || !sessionAction) return;
+  if (authRuntime.required && authRuntime.user) {
+    profile.hidden = false;
+    profile.querySelector('.avatar').textContent = accountInitials();
+    profile.querySelector('strong').textContent = authRuntime.user.name;
+    profile.querySelector('small').textContent = authRuntime.user.email;
+    sessionAction.dataset.action = 'logout-account';
+    sessionAction.querySelector('span:last-child').textContent = '退出登录';
+  } else {
+    sessionAction.dataset.action = 'shutdown-app';
+    sessionAction.querySelector('span:last-child').textContent = '退出软件';
+  }
+}
+
+function renderAccountDialog() {
+  if (!state.ui.accountDialogOpen || !authRuntime.user) return '';
+  return `<div class="modal-backdrop dynamic-overlay" data-action="close-overlay"><section class="modal overlay-panel account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title"><div class="modal-header"><div><h2 id="account-dialog-title">账户与安全</h2><p>${escapeHtml(authRuntime.user.email)} · 云端账户</p></div><button class="icon-button overlay-close" data-action="close-overlay" aria-label="关闭账户设置">${svgIcon('x')}</button></div><div class="account-summary"><span class="account-avatar">${escapeHtml(accountInitials())}</span><div><strong>${escapeHtml(authRuntime.user.name)}</strong><small>账户创建于 ${new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(Number(authRuntime.user.createdAt) * 1000))}</small></div></div><form id="account-profile-form" class="account-form"><h3>个人资料</h3><label for="account-name"><span>姓名</span><input id="account-name" name="name" value="${escapeHtml(authRuntime.user.name)}" minlength="2" maxlength="40" required></label><button class="button button--secondary" type="submit">保存姓名</button></form><form id="account-password-form" class="account-form"><h3>修改密码</h3><label for="account-current-password"><span>当前密码</span><input id="account-current-password" name="currentPassword" type="password" autocomplete="current-password" required></label><label for="account-new-password"><span>新密码</span><input id="account-new-password" name="newPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required placeholder="至少 10 个字符"></label><label for="account-confirm-password"><span>确认新密码</span><input id="account-confirm-password" name="confirmPassword" type="password" autocomplete="new-password" required></label><button class="button button--primary" type="submit">更新密码</button></form><div class="account-session"><div><strong>登录设备</strong><p>可保留当前设备，并让其他浏览器立即退出。</p></div><button class="button button--quiet" data-action="revoke-other-sessions">退出其他设备</button></div><div class="modal-actions"><button class="button button--secondary" data-action="close-overlay">完成</button><button class="button button--quiet" data-action="logout-account">退出当前账户</button></div></section></div>`;
+}
+
 function renderOverlays() {
   const root = $('#overlay-root');
-  root.innerHTML = renderImagePreview() || renderMapsKeyDialog() || renderApiKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
+  root.innerHTML = renderImagePreview() || renderAccountDialog() || renderMapsKeyDialog() || renderApiKeyDialog() || renderProductDrawer() || renderProductPicker() || renderPromptDialog() || renderConfirmDialog();
   document.body.classList.toggle('overlay-open', Boolean(root.innerHTML) || !$('#import-modal').hidden);
   hydrateIcons(root);
 }
 
 function render() {
+  renderAuthSurface();
+  if (authRuntime.required && !authRuntime.user) return;
+  syncAccountShell();
   renderTopbar();
   const views = { home: renderHome, studio: renderStudio, products: renderProducts, templates: renderTemplates, assets: renderAssets, exports: renderExports, connections: renderConnections };
   $('#app-view').innerHTML = (views[state.ui.route] || renderHome)();
@@ -1173,6 +1280,7 @@ function closeOverlay() {
   state.ui.productPickerOpen = false;
   state.ui.promptDialogGroupId = '';
   state.ui.confirmBatch = false;
+  state.ui.accountDialogOpen = false;
   render();
   requestAnimationFrame(() => lastFocusedElement?.focus());
 }
@@ -1239,6 +1347,52 @@ async function waitForSubmissionWindow(batchId, targetTime) {
   }
 }
 
+async function authApi(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, { cache: 'no-store', credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+  } catch {
+    const error = new Error('账户服务连接失败，请检查网络后重试。');
+    error.code = 'NETWORK_ERROR';
+    throw error;
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || '账户请求失败，请稍后重试。');
+    error.code = data?.error?.code || `HTTP_${response.status}`;
+    throw error;
+  }
+  return data;
+}
+
+async function finishAuthentication(result) {
+  authRuntime.user = result.user;
+  authRuntime.recoveryEnabled = Boolean(result.recoveryEnabled ?? authRuntime.recoveryEnabled);
+  authRuntime.error = '';
+  authRuntime.notice = '';
+  authRuntime.view = 'login';
+  state = structuredClone(seedState);
+  loadLocalState();
+  await loadState();
+  const route = location.hash.slice(1).split('?')[0];
+  setRoute(routeMeta[route] ? route : (state.ui.route || 'products'), false, false);
+  render();
+  await resumePendingBatch();
+}
+
+async function logoutAccount() {
+  try { await authApi('/api/auth/logout', { method: 'POST', body: '{}' }); } catch { /* clear local view even if the network is unavailable */ }
+  Object.keys(PROVIDERS).forEach(clearProviderApiKey);
+  clearGoogleMapsApiKey();
+  authRuntime.user = null;
+  authRuntime.view = 'login';
+  authRuntime.error = '';
+  authRuntime.notice = '已安全退出当前账户。';
+  state = structuredClone(seedState);
+  $('#overlay-root').innerHTML = '';
+  renderAuthSurface();
+}
+
 async function apiJson(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (path.startsWith('/api/qwen/')) {
@@ -1286,6 +1440,12 @@ async function apiJson(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data?.error?.message || '请求失败，请稍后重试。');
     error.code = data?.error?.code || `HTTP_${response.status}`;
+    if (error.code === 'AUTH_REQUIRED') {
+      authRuntime.user = null;
+      authRuntime.view = 'login';
+      authRuntime.notice = '登录状态已过期，请重新登录后继续。';
+      renderAuthSurface();
+    }
     throw error;
   }
   return data;
@@ -1882,11 +2042,30 @@ async function exportSelectedAssets() {
 }
 
 document.addEventListener('click', async (event) => {
+  const authViewButton = event.target.closest('[data-auth-view]');
+  if (authViewButton) {
+    authRuntime.view = authViewButton.dataset.authView;
+    authRuntime.error = '';
+    authRuntime.notice = '';
+    renderAuthSurface();
+    return;
+  }
   const routeButton = event.target.closest('[data-route]');
   if (routeButton) { setRoute(routeButton.dataset.route); return; }
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const action = button.dataset.action;
+  if (action === 'open-account') { rememberFocus(); state.ui.accountDialogOpen = true; render(); focusOverlay(); return; }
+  if (action === 'logout-account') { await logoutAccount(); return; }
+  if (action === 'revoke-other-sessions') {
+    button.disabled = true;
+    try {
+      const result = await authApi('/api/auth/sessions/revoke-others', { method: 'POST', body: '{}' });
+      showToast('其他设备已退出', result.message, 'shield');
+    } catch (error) { showToast('操作失败', error.message, 'info'); }
+    finally { button.disabled = false; }
+    return;
+  }
   if (action === 'back-styles') { stylePreviewId = ''; stylePromptError = ''; render(); focusOverlay(); return; }
   if (action === 'ground-location') {
     const option = state.promptGroups.find((group) => group.id === 'group-location')?.options.find((item) => item.id === button.dataset.id);
@@ -2172,6 +2351,65 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+document.addEventListener('submit', async (event) => {
+  const form = event.target;
+  if (!form.matches('#auth-login-form, #auth-register-form, #auth-forgot-form, #auth-reset-form, #account-profile-form, #account-password-form')) return;
+  event.preventDefault();
+  if (authRuntime.busy) return;
+  const fields = new FormData(form);
+  const value = (name) => String(fields.get(name) || '');
+
+  if ((form.id === 'auth-register-form' || form.id === 'auth-reset-form') && value('password') !== value('confirmPassword')) {
+    authRuntime.error = '两次输入的密码不一致。';
+    renderAuthSurface();
+    return;
+  }
+  if (form.id === 'account-password-form' && value('newPassword') !== value('confirmPassword')) {
+    showToast('密码未更新', '两次输入的新密码不一致。', 'info');
+    form.querySelector('[name="confirmPassword"]')?.focus();
+    return;
+  }
+
+  authRuntime.busy = true;
+  authRuntime.error = '';
+  if (form.id.startsWith('auth-')) renderAuthSurface();
+  else form.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+
+  try {
+    if (form.id === 'auth-login-form') {
+      await finishAuthentication(await authApi('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: value('email'), password: value('password') }) }));
+    } else if (form.id === 'auth-register-form') {
+      await finishAuthentication(await authApi('/api/auth/register', { method: 'POST', body: JSON.stringify({ name: value('name'), email: value('email'), password: value('password') }) }));
+    } else if (form.id === 'auth-forgot-form') {
+      const result = await authApi('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: value('email') }) });
+      authRuntime.notice = result.message;
+      authRuntime.error = '';
+    } else if (form.id === 'auth-reset-form') {
+      const result = await authApi('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: authRuntime.resetToken, password: value('password') }) });
+      authRuntime.resetToken = '';
+      authRuntime.view = 'login';
+      authRuntime.notice = result.message;
+      history.replaceState(null, '', `${location.pathname}${location.search}#login`);
+    } else if (form.id === 'account-profile-form') {
+      const result = await authApi('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ name: value('name') }) });
+      authRuntime.user = result.user;
+      showToast('个人资料已保存', '侧边栏账户信息已经更新。', 'check');
+      render();
+    } else if (form.id === 'account-password-form') {
+      const result = await authApi('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: value('currentPassword'), newPassword: value('newPassword') }) });
+      form.reset();
+      showToast('密码已更新', result.message, 'shield');
+    }
+  } catch (error) {
+    if (form.id.startsWith('auth-')) authRuntime.error = error.message;
+    else showToast('账户操作失败', error.message, 'info');
+  } finally {
+    authRuntime.busy = false;
+    if (form.id.startsWith('auth-') && (!authRuntime.user || form.id === 'auth-forgot-form' || form.id === 'auth-reset-form')) renderAuthSurface();
+    else form.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  }
+});
+
 $('#import-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -2186,12 +2424,25 @@ $('#mobile-menu').addEventListener('click', () => {
 });
 
 (async function init() {
-  hydrateIcons(); loadLocalState();
+  hydrateIcons();
+  const hash = location.hash.slice(1);
+  if (hash.startsWith('reset-password?')) {
+    authRuntime.view = 'reset';
+    authRuntime.resetToken = new URLSearchParams(hash.split('?')[1] || '').get('token') || '';
+  }
+  const authenticated = await loadBootstrapAuth();
+  if (authRuntime.required && (authRuntime.view === 'reset' || !authenticated)) {
+    authRuntime.user = null;
+    if (authRuntime.view === 'reset' && !authRuntime.resetToken) authRuntime.error = '重置链接不完整，请重新申请。';
+    renderAuthSurface();
+    return;
+  }
+  loadLocalState();
   Object.keys(PROVIDERS).forEach((provider) => { if (!getProviderApiKey(provider)) state.connection.authenticated[provider] = false; });
-  const initialRoute = location.hash.slice(1);
+  const initialRoute = location.hash.slice(1).split('?')[0];
   setRoute(routeMeta[initialRoute] ? initialRoute : (state.ui.route || 'products'), false, false);
   await loadState();
-  const refreshedRoute = location.hash.slice(1);
+  const refreshedRoute = location.hash.slice(1).split('?')[0];
   setRoute(routeMeta[refreshedRoute] ? refreshedRoute : (state.ui.route || 'products'), false, false);
   await resumePendingBatch();
 })();

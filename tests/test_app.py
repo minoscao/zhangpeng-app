@@ -37,7 +37,7 @@ class DesignFlowTests(unittest.TestCase):
         self.assertNotIn("apiKey", json.dumps(config))
 
     def test_required_files_exist(self):
-        for relative in ("app/index.html", "app/styles.css", "app/core.js", "app/export.js", "app/app-v2.js", "worker.js", "server.py", "start.ps1", "tests/test_export.mjs", "dist/DesignFlow Studio.exe"):
+        for relative in ("app/index.html", "app/styles.css", "app/core.js", "app/export.js", "app/app-v2.js", "auth.js", "migrations/0001_auth.sql", "worker.js", "server.py", "start.ps1", "tests/test_auth.mjs", "tests/test_export.mjs", "dist/DesignFlow Studio.exe"):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_static_markup_accessibility_basics(self):

@@ -6,10 +6,11 @@
   <meta name="theme-color" content="#302b68">
   <meta name="description" content="创想设计平台——可连接多种图像模型、产品库和行业模板的本地 AI 设计工作台">
   <title>创想设计平台｜AI 产品设计工作台</title>
-  <link rel="stylesheet" href="/styles.css?v=3.13">
+  <link rel="stylesheet" href="/styles.css?v=3.14">
 </head>
-<body>
+<body class="auth-pending">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <div id="auth-root" aria-live="polite"><div class="auth-boot"><span class="auth-boot-mark" aria-hidden="true"></span><strong>正在检查登录状态</strong></div></div>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
       <div class="brand">
@@ -29,12 +30,12 @@
       <div class="sidebar-section-label">系统</div>
       <nav class="nav-list nav-list--secondary" aria-label="系统导航">
         <button class="nav-item" data-route="connections"><span class="nav-icon" data-icon="database"></span><span>模型连接</span></button>
-        <button class="nav-item" data-action="shutdown-app"><span class="nav-icon" data-icon="power"></span><span>退出软件</span></button>
+        <button class="nav-item" id="session-action" data-action="shutdown-app"><span class="nav-icon" data-icon="power"></span><span>退出软件</span></button>
       </nav>
 
       <div class="sidebar-bottom">
         <div class="local-card"><span class="status-dot" aria-hidden="true"></span><div><strong>本地工作区</strong><span>设计数据保存在当前电脑</span></div></div>
-        <div class="profile-button"><span class="avatar">DS</span><span><strong>Design Studio</strong><small>专业版</small></span><span class="profile-more" aria-hidden="true">›</span></div>
+        <button class="profile-button" id="profile-button" type="button" data-action="open-account" aria-label="打开账户设置"><span class="avatar">DS</span><span><strong>Design Studio</strong><small>本地工作区</small></span><span class="profile-more" aria-hidden="true">›</span></button>
       </div>
     </aside>
 
@@ -69,6 +70,6 @@
   <div id="overlay-root"></div>
   <script src="/core.js?v=1.7" defer></script>
   <script src="/export.js?v=1.0" defer></script>
-  <script src="/app-v2.js?v=5.9" defer></script>
+  <script src="/app-v2.js?v=6.0" defer></script>
 </body>
 </html>
